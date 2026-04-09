@@ -1,22 +1,38 @@
-/012 реестры + файлы
-/013 животные без владельцев + файлы
-/animal_cards_registry_part1.json
-/catch_orders_registry_part1.json
-/stray_animals_registry_part1.json
-/universal
-/universal_v2
-/universal_v2.zip
-/Инструкция по применению скрипта валидации.docx
-/Инструкция по применению скрипта миграции.docx
-/Инструкция по применению скрипта отката.docx
-/Миграция возвращение.rar
-/Скрипт валидации
-/Скрипты миграции
-/Скрипты отката
-/Технология_проверки_работоспособности_скриптов.docx
-/Форма_для_миграции_Мой_питомец_136_1.xlsm
-# Runtime artifacts
-universal_myPet/logs/script_creation_log-*.txt
-universal_myPet/logs/success_log-*.txt
-universal_myPet/logs/fail_log-*.txt
+# Track only curated top-level content in this repository
+/*
+!/.gitignore
+!/README.md
+!/CONTRIBUTING.md
+!/AI_AGENT_PROMPT.md
+!/.github/
+!/.github/**
+!/docs/
+!/docs/**
+!/universal_myPet/
+!/universal_myPet/**
+
+# Python caches
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Local session and runtime state
+universal_myPet/token.md
+universal_myPet/cookie.md
+universal_myPet/token copy.md
+universal_myPet/cookie copy.md
+universal_myPet/state/checkpoints.json
+universal_myPet/ROLLBACK_BODY.json
+
+# Runtime logs and distributions
+universal_myPet/logs/*.txt
 universal_myPet/dist/
+
+# Local temp books and office lock files
+universal_myPet/test_books/
+universal_myPet/~$*.xlsm
+
+# Large local media (avoid accidental commits)
+universal_myPet/files/**/*.mp4
+universal_myPet/files/**/*.mov
+universal_myPet/files/**/*.avi
