@@ -15,3 +15,7 @@
 /Скрипты отката
 /Технология_проверки_работоспособности_скриптов.docx
 /Форма_для_миграции_Мой_питомец_136_1.xlsm
+# Runtime artifacts
+universal_myPet/logs/script_creation_log-*.txt
+universal_myPet/logs/success_log-*.txt
+universal_myPet/logs/fail_log-*.txt

@@ -100,9 +100,10 @@ python migration.py --profile dev --operator-mode
 ```
 
 В operator-flow доступны действия:
-- `Retry`
-- `Skip`
-- `Abort`
+- `Повторить` (`п`, `retry`)
+- `Пропустить` (`пр`, `skip`)
+- `Дальше` для нефатальных ошибок (`д`, `continue`)
+- `Остановить` (`о`, `abort`)
 
 ## Resume / checkpoints
 

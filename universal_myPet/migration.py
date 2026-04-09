@@ -182,10 +182,10 @@ def _choose_single_workbook(candidates: List[str], interactive: bool) -> Optiona
         return None
     if len(candidates) == 1 or not interactive:
         return candidates[0]
-    print("\nAvailable workbooks:")
+    print("\nДоступные книги для миграции:")
     for i, wb in enumerate(candidates, start=1):
         print("  %s) %s" % (i, wb))
-    raw = input("Choose workbook index [1]: ").strip()
+    raw = input("Выберите номер книги [1]: ").strip()
     if not raw:
         return candidates[0]
     try:
@@ -202,10 +202,10 @@ def _choose_mass_workbooks(candidates: List[str], interactive: bool) -> List[str
         return []
     if not interactive:
         return list(candidates)
-    print("\nAvailable workbooks:")
+    print("\nДоступные книги для миграции:")
     for i, wb in enumerate(candidates, start=1):
         print("  %s) %s" % (i, wb))
-    raw = input("Choose workbook indexes separated by comma, or Enter for ALL: ").strip()
+    raw = input("Введите номера книг через запятую или нажмите Enter для выбора всех: ").strip()
     if not raw:
         return list(candidates)
     selected = []
@@ -297,12 +297,12 @@ def _infer_files_dir_for_workbook(
             default_idx = i
             break
 
-    print("\nWorkbook: %s" % wb_name)
-    print("Choose files folder:")
-    print("  0) %s (root)" % os.path.abspath(files_root))
+    print("\nКнига: %s" % wb_name)
+    print("Выберите папку с файлами:")
+    print("  0) %s (корень)" % os.path.abspath(files_root))
     for i, d in enumerate(subdirs, start=1):
         print("  %s) %s" % (i, os.path.basename(d)))
-    raw = input("Folder index [%s]: " % default_idx).strip()
+    raw = input("Номер папки [%s]: " % default_idx).strip()
     if not raw:
         return options[default_idx]
     try:
@@ -417,6 +417,36 @@ def _is_upload_error(exc):
         s = str(exc).lower()
         return "upload" in s or "загруз" in s
     return False
+
+
+def _compact_console_text(value: Any, *, max_len: int = 220) -> str:
+    text = as_string_or_null(value) or ""
+    if "<" in text and ">" in text:
+        text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3].rstrip() + "..."
+
+
+def _format_operator_error(error_obj: Any) -> str:
+    if isinstance(error_obj, dict):
+        msg = as_string_or_null(error_obj.get("message") or error_obj.get("error"))
+        code = error_obj.get("code")
+        data = _compact_console_text(error_obj.get("data"), max_len=180)
+        out = []
+        if code is not None:
+            out.append("код=%s" % code)
+        if msg:
+            out.append(msg)
+        if data:
+            out.append("ответ=%s" % data)
+        if out:
+            return "; ".join(out)
+        return _compact_console_text(json.dumps(error_obj, ensure_ascii=False), max_len=220) or "неизвестная ошибка"
+    return _compact_console_text(error_obj, max_len=220) or "неизвестная ошибка"
 
 
 def build_file_placeholder(filename, size, entity_field_path, allow_external=False):
@@ -3355,37 +3385,37 @@ def _setup_runtime_profile(args) -> str:
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="Pet migration runner (Excel/JSON -> PGS).")
+    parser = argparse.ArgumentParser(description="Миграция «Мой питомец» (Excel/JSON -> ПГС).")
     parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="dev")
-    parser.add_argument("--base-url", default="", help="Override stand base URL.")
-    parser.add_argument("--jwt-url", default="", help="Override JWT page URL used for auto refresh.")
+    parser.add_argument("--base-url", default="", help="Переопределить базовый URL стенда.")
+    parser.add_argument("--jwt-url", default="", help="Переопределить URL страницы JWT для автообновления.")
     parser.add_argument("--mode", choices=["auto", "single", "mass"], default="auto")
-    parser.add_argument("--workbooks", default="", help="Explicit workbook list (separator ';' or new line).")
-    parser.add_argument("--files-map", default="", help="Workbook->files folder map: 'book1.xlsm=one;book2.xlsm=two'.")
-    parser.add_argument("--ask-files-always", action="store_true", help="Always ask files folder for each selected workbook.")
-    parser.add_argument("--dry-run", action="store_true", help="Only parse input and log summaries, no create/update requests.")
-    parser.add_argument("--auth-only", action="store_true", help="Validate auth and exit.")
-    parser.add_argument("--skip-auth", action="store_true", help="Skip auth. Allowed only with --dry-run.")
-    parser.add_argument("--no-prompt", action="store_true", help="Read cookie/token from files only.")
+    parser.add_argument("--workbooks", default="", help="Явный список книг (разделитель ';' или новая строка).")
+    parser.add_argument("--files-map", default="", help="Связка книга->папка файлов: 'book1.xlsm=one;book2.xlsm=two'.")
+    parser.add_argument("--ask-files-always", action="store_true", help="Всегда спрашивать папку файлов для каждой выбранной книги.")
+    parser.add_argument("--dry-run", action="store_true", help="Только разбор входных данных и сводные логи, без create/update запросов.")
+    parser.add_argument("--auth-only", action="store_true", help="Проверить авторизацию и завершить работу.")
+    parser.add_argument("--skip-auth", action="store_true", help="Пропустить авторизацию. Допустимо только вместе с --dry-run.")
+    parser.add_argument("--no-prompt", action="store_true", help="Брать cookie/token только из файлов, без запросов в консоли.")
     parser.add_argument(
         "--no-interactive",
         action="store_true",
-        help="Disable all interactive prompts (workbooks/files/operator decisions).",
+        help="Отключить все интерактивные запросы (книги/файлы/operator-решения).",
     )
     parser.add_argument(
         "--operator-mode",
         action="store_true",
-        help="Force operator decisions mode (retry/skip/abort prompts on row errors).",
+        help="Принудительно включить operator-режим (повтор/пропуск/остановка при ошибках строк).",
     )
-    parser.add_argument("--limit", type=int, default=0, help="Limit rows per registry job (0 = no limit).")
+    parser.add_argument("--limit", type=int, default=0, help="Ограничить число строк для каждой задачи реестра (0 = без ограничений).")
 
     resume_group = parser.add_mutually_exclusive_group()
-    resume_group.add_argument("--resume", dest="resume", action="store_true", help="Force enable resume checkpoints.")
-    resume_group.add_argument("--no-resume", dest="resume", action="store_false", help="Disable resume checkpoints.")
+    resume_group.add_argument("--resume", dest="resume", action="store_true", help="Принудительно включить checkpoints для resume.")
+    resume_group.add_argument("--no-resume", dest="resume", action="store_false", help="Отключить checkpoints для resume.")
     parser.set_defaults(resume=None)
 
-    parser.add_argument("--reset-state", action="store_true", help="Reset resume namespace before run.")
-    parser.add_argument("--state-file", default="", help="Override checkpoint file path.")
+    parser.add_argument("--reset-state", action="store_true", help="Очистить namespace resume перед запуском.")
+    parser.add_argument("--state-file", default="", help="Переопределить путь к файлу checkpoints.")
     return parser.parse_args()
 
 
@@ -3484,34 +3514,38 @@ def _process_job_with_resume(
                 guid=str(guid),
             )
 
-    def _operator_row_action(row_num: int, exc_msg: str) -> str:
+    def _operator_row_action(row_num: int, error_obj: Any) -> str:
+        err_msg = _format_operator_error(error_obj)
         while True:
             try:
                 raw = input(
-                    "[OPERATOR] %s/%s row=%s failed: %s\nActions: [R]etry / [S]kip / [A]bort: "
-                    % (workbook_label, job_name, row_num, exc_msg)
-                ).strip().lower()
+                    "[ОПЕРАТОР] %s/%s строка=%s: ошибка обработки\nДетали: %s\nДействия: [П]овторить / [Пр]опустить / [О]становить: "
+                    % (workbook_label, job_name, row_num, err_msg)
+                )
             except EOFError:
                 return "abort"
-            if raw in {"r", "retry"}:
+            normalized = norm_ru(raw)
+            if normalized in {"r", "retry", "п", "повтор", "повторить"}:
                 return "retry"
-            if raw in {"s", "skip"}:
+            if normalized in {"s", "skip", "пр", "пропустить"}:
                 return "skip"
-            if raw in {"a", "abort"}:
+            if normalized in {"a", "abort", "о", "остановить", "выход", "q", "quit"}:
                 return "abort"
 
-    def _operator_row_post_error_action(row_num: int, exc_msg: str) -> str:
+    def _operator_row_post_error_action(row_num: int, error_obj: Any) -> str:
+        err_msg = _format_operator_error(error_obj)
         while True:
             try:
                 raw = input(
-                    "[OPERATOR] %s/%s row=%s has non-fatal error: %s\nActions: [C]ontinue / [A]bort: "
-                    % (workbook_label, job_name, row_num, exc_msg)
-                ).strip().lower()
+                    "[ОПЕРАТОР] %s/%s строка=%s: нефатальная ошибка\nДетали: %s\nДействия: [Д]альше / [О]становить: "
+                    % (workbook_label, job_name, row_num, err_msg)
+                )
             except EOFError:
                 return "abort"
-            if raw in {"", "c", "continue"}:
+            normalized = norm_ru(raw)
+            if normalized in {"", "c", "continue", "д", "далее", "дальше", "продолжить"}:
                 return "continue"
-            if raw in {"a", "abort"}:
+            if normalized in {"a", "abort", "о", "остановить", "выход", "q", "quit"}:
                 return "abort"
 
     if RUNTIME_OPERATOR_MODE and interactive:
@@ -3534,13 +3568,12 @@ def _process_job_with_resume(
                 if stopped:
                     if len(errors) > errors_before:
                         last_err = errors[-1]
-                        action = _operator_row_action(row_num, str(last_err.get("error") or "unknown-error"))
+                        action = _operator_row_action(row_num, last_err.get("error"))
                         if action == "retry":
                             del errors[errors_before:]
                             continue
                         if action == "skip":
                             break
-                        return True
                         return True
 
                 row_success = False
@@ -3557,11 +3590,11 @@ def _process_job_with_resume(
                 if len(errors) > errors_before:
                     last_err = errors[-1]
                     if row_success:
-                        action = _operator_row_post_error_action(row_num, str(last_err.get("error") or "unknown-error"))
+                        action = _operator_row_post_error_action(row_num, last_err.get("error"))
                         if action == "abort":
                             return True
                         break
-                    action = _operator_row_action(row_num, str(last_err.get("error") or "unknown-error"))
+                    action = _operator_row_action(row_num, last_err.get("error"))
                     if action == "retry":
                         del errors[errors_before:]
                         continue

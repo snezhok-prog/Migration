@@ -19,7 +19,7 @@ from _config import (
     STORAGE_UPLOAD_PATH,
     VERIFY_SSL,
 )
-from _utils import build_multipart_body, fix_mojibake_deep, jsonable, make_boundary, safe_json
+from _utils import build_multipart_body, fix_mojibake_deep, jsonable, make_boundary, norm_ru, safe_json
 
 
 class ApiCallError(RuntimeError):
@@ -259,7 +259,7 @@ def _refresh_token_from_jwt_page(session, logger):
         try:
             resp = session.get(url, timeout=90, allow_redirects=True)
         except Exception as exc:
-            logger.warning("[AUTH][JWT] GET %s failed: %s", url, exc)
+            logger.warning("[AUTH][JWT] GET %s не выполнен: %s", url, exc)
             continue
         logger.info("[AUTH][JWT] GET %s -> %s", url, resp.status_code)
         if resp.status_code >= 400:
@@ -280,7 +280,7 @@ def _reauth_session(session, logger):
 
     token = _refresh_token_from_jwt_page(session, logger)
     if not token:
-        logger.warning("[AUTH] auto-jwt failed: token not found")
+        logger.warning("[AUTH] auto-jwt не выполнен: токен не найден")
         return False
 
     _apply_token_headers(session, token)
@@ -301,22 +301,22 @@ def setup_session(
 ):
     defaults = _load_default_auth_from_files()
 
-    print("\nCookie and token can be read from files next to script:")
+    print("\nCookie и token можно взять из файлов рядом со скриптом:")
     print("  cookie: %s" % defaults["cookie_path"])
     print("  token:  %s" % defaults["token_path"])
 
     if no_prompt:
-        print("No prompt mode: using values from files only.")
+        print("Режим без запросов: используются значения только из файлов.")
         cookie_input = ""
         jwt_input = ""
     else:
-        print("Press Enter to use file values.")
+        print("Нажмите Enter, чтобы использовать значения из файлов.")
         try:
-            cookie_input = input("Cookie: ").replace("\ufeff", "").strip()
+            cookie_input = input("Cookie (или Enter): ").replace("\ufeff", "").strip()
         except EOFError:
             cookie_input = ""
         try:
-            jwt_input = input("JWT token: ").replace("\ufeff", "").strip()
+            jwt_input = input("JWT token (или Enter): ").replace("\ufeff", "").strip()
         except EOFError:
             jwt_input = ""
 
@@ -324,7 +324,7 @@ def setup_session(
     jwt_token = _extract_jwt(jwt_input or defaults["token"])
 
     if not cookie_header and not jwt_token:
-        logger.error("No Cookie and no JWT token provided")
+        logger.error("Не переданы ни Cookie, ни JWT token")
         return None
 
     auto_jwt = AUTO_JWT if auto_jwt_override is None else bool(auto_jwt_override)
@@ -367,7 +367,7 @@ def setup_session(
     if auto_jwt and _reauth_session(session, logger):
         return session
 
-    logger.error("Authorization failed. Update cookie/token and try again.")
+    logger.error("Авторизация не прошла. Обновите cookie/token и повторите запуск.")
     return None
 
 
@@ -383,7 +383,7 @@ def api_request(session, logger, method, url, reauth_fn=None, max_retries=None, 
         response = session.request(method=method.upper(), url=url, timeout=120, **kwargs)
         if not REAUTH_ON_AUTH_ERROR or response.status_code not in auth_codes:
             break
-        logger.warning("HTTP %s from %s. Trying auto re-auth", response.status_code, url)
+        logger.warning("HTTP %s от %s. Пробуем авто-переавторизацию", response.status_code, url)
         if not _reauth_session(session, logger):
             break
 
@@ -392,14 +392,18 @@ def api_request(session, logger, method, url, reauth_fn=None, max_retries=None, 
         if bool(meta.get("operator_mode")):
             while True:
                 try:
-                    raw = input("[AUTH] Session expired (HTTP %s). Actions: [L]ogin/[A]bort: " % response.status_code).strip().lower()
+                    raw = input(
+                        "[AUTH] Сессия истекла (HTTP %s). Действия: [В]ойти заново / [О]становить: "
+                        % response.status_code
+                    )
                 except EOFError:
-                    raw = "a"
-                if not raw:
-                    raw = "l"
-                if raw == "a":
+                    raw = "о"
+                normalized = norm_ru(raw)
+                if not normalized:
+                    normalized = "в"
+                if normalized in {"o", "о", "остановить", "abort", "a"}:
                     break
-                if raw != "l":
+                if normalized not in {"в", "v", "login", "l", "войти", "логин"}:
                     continue
                 refreshed = setup_session(
                     logger,
@@ -491,7 +495,7 @@ def upload_file_base64(session, logger, entry_name, entry_id, entity_field_path,
     data = _parse_response_data(response)
     if 200 <= response.status_code < 300:
         return {"code": response.status_code, "data": data}
-    raise ApiCallError("Upload failed: HTTP %s" % response.status_code, code=response.status_code, data=data)
+    raise ApiCallError("Ошибка загрузки: HTTP %s" % response.status_code, code=response.status_code, data=data)
 
 
 def upload_file(
@@ -532,7 +536,7 @@ def upload_file(
     if 200 <= response.status_code < 300:
         return {"code": response.status_code, "data": resp_data}
     raise ApiCallError(
-        "Upload file failed: HTTP %s" % response.status_code,
+        "Ошибка загрузки файла: HTTP %s" % response.status_code,
         code=response.status_code,
         data=resp_data,
     )
