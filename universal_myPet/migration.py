@@ -3386,7 +3386,7 @@ def _setup_runtime_profile(args) -> str:
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="Миграция «Мой питомец» (Excel/JSON -> ПГС).")
-    parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="dev")
+    parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="psi")
     parser.add_argument("--base-url", default="", help="Переопределить базовый URL стенда.")
     parser.add_argument("--jwt-url", default="", help="Переопределить URL страницы JWT для автообновления.")
     parser.add_argument("--mode", choices=["auto", "single", "mass"], default="auto")

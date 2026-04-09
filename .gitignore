@@ -19,3 +19,4 @@
 universal_myPet/logs/script_creation_log-*.txt
 universal_myPet/logs/success_log-*.txt
 universal_myPet/logs/fail_log-*.txt
+universal_myPet/dist/

@@ -66,7 +66,7 @@ def _search_page(session, logger, collection: str, page: int, size: int):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Clear pet migration collections in PGS.")
-    parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="dev")
+    parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="psi")
     parser.add_argument("--base-url", default="", help="Override stand base URL.")
     parser.add_argument("--jwt-url", default="", help="Override JWT page URL.")
     parser.add_argument("--collections", default="", help="Collections list (separator: ',', ';' or new line).")

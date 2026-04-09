@@ -40,7 +40,7 @@ pip install -r requirements.txt
 Проверка авторизации:
 
 ```bash
-python migration.py --profile dev --auth-only
+python migration.py --profile psi --auth-only
 ```
 
 Обычная миграция (интерактивно):
@@ -55,13 +55,15 @@ Dry-run без API:
 python migration.py --dry-run --skip-auth
 ```
 
-## Переключение стенда (DEV / PSI / PROD)
+По умолчанию профиль запуска: `psi`.
+
+## Переключение стенда (PSI / DEV / PROD)
 
 Переключение делается флагом `--profile`:
 
 ```bash
-python migration.py --profile dev
 python migration.py --profile psi
+python migration.py --profile dev
 python migration.py --profile prod
 ```
 
@@ -80,6 +82,21 @@ python migration.py --profile custom --base-url "https://your-stand" --jwt-url "
 ```
 
 Профили и URL заданы в `_profiles.py`.
+
+## Передача в эксплуатацию
+
+Перед передачей на новую ВМ:
+- заполните `token.md` и `cookie.md` актуальными значениями для нужного стенда;
+- убедитесь, что установлен Python и зависимости из `requirements.txt`;
+- запускайте из папки проекта, пути внутри скрипта относительные (привязки к вашему ПК не требуются).
+
+Готовые команды для PSI:
+
+```bat
+run_psi_auth_only.cmd
+run_psi_migration.cmd
+run_psi_dry_run.cmd
+```
 
 ## Массовая миграция и папки файлов
 
