@@ -261,19 +261,38 @@ def _apply_cookies(session, cookie_raw, logger):
 
 
 def _auth_test(session, logger):
-    auth_url = _build_url("/api/v1/search/%s" % AUTH_TEST_COLLECTION)
-    body = {
-        "search": {"search": [{"andSubConditions": [{"field": "_id", "operator": "notNull"}]}]},
-        "limit": 1,
-        "offset": 0,
-    }
-    try:
-        resp = session.post(auth_url, json=body, timeout=60)
-    except Exception as exc:
-        logger.warning("[AUTH TEST] request error: %s", exc)
-        return False
-    logger.info("[AUTH TEST] %s -> %s", auth_url, resp.status_code)
-    return resp.status_code < 400
+    checks = [
+        (
+            _build_url("/api/v1/search/%s" % AUTH_TEST_COLLECTION),
+            {
+                "search": {"search": [{"andSubConditions": [{"field": "_id", "operator": "notNull"}]}]},
+                "limit": 1,
+                "offset": 0,
+            },
+        ),
+        (
+            _build_url("/api/v1/search/subservices"),
+            {},
+        ),
+    ]
+    any_json_200 = False
+    for auth_url, body in checks:
+        try:
+            resp = session.post(auth_url, json=body, timeout=60)
+        except Exception as exc:
+            logger.warning("[AUTH TEST] request error: %s (%s)", exc, auth_url)
+            continue
+        content_type = str(resp.headers.get("content-type") or "").lower()
+        logger.info("[AUTH TEST] POST %s -> %s | ct=%s", auth_url, resp.status_code, content_type)
+        if resp.status_code == 200 and "application/json" in content_type:
+            any_json_200 = True
+            break
+    return any_json_200
+
+
+def _drop_token_headers(session):
+    session.headers.pop("token", None)
+    session.headers.pop("Authorization", None)
 
 
 def _refresh_token_from_jwt_page(session, logger):
@@ -333,7 +352,9 @@ def setup_session(
 ):
     defaults = _load_default_auth_from_files()
 
-    print("\nCookie и token можно взять из файлов рядом со скриптом:")
+    print("\nВставь ОДНОЙ СТРОКОЙ значение заголовка Cookie из браузера (Network -> Request Headers -> Cookie).")
+    print("Пример: PLATFORM_SESSION=...; XSRF-TOKEN=...; ...")
+    print("Cookie и token также можно взять из файлов рядом со скриптом:")
     print("  cookie: %s" % defaults["cookie_path"])
     print("  token:  %s" % defaults["token_path"])
 
@@ -344,16 +365,27 @@ def setup_session(
     else:
         print("Нажмите Enter, чтобы использовать значения из файлов.")
         try:
-            cookie_input = input("Cookie (или Enter): ").replace("\ufeff", "").strip()
+            cookie_input = input("Cookie: ").replace("\ufeff", "").strip()
         except EOFError:
             cookie_input = ""
         try:
-            jwt_input = input("JWT token (или Enter): ").replace("\ufeff", "").strip()
+            jwt_input = input("JWT токен (можно Enter): ").replace("\ufeff", "").strip()
         except EOFError:
             jwt_input = ""
 
-    cookie_header = cookie_input or defaults["cookie"]
-    jwt_token = _clean_token_for_headers(jwt_input or defaults["token"])
+    if no_prompt:
+        cookie_header = defaults["cookie"]
+        jwt_raw = defaults["token"]
+    else:
+        cookie_header = cookie_input or defaults["cookie"]
+        if jwt_input:
+            jwt_raw = jwt_input
+        elif cookie_input:
+            # Operator entered cookie manually and left JWT empty intentionally.
+            jwt_raw = ""
+        else:
+            jwt_raw = defaults["token"]
+    jwt_token = _clean_token_for_headers(jwt_raw)
 
     if not cookie_header and not jwt_token:
         logger.error("Не переданы ни Cookie, ни JWT token")
@@ -395,6 +427,15 @@ def setup_session(
     if _auth_test(session, logger):
         _save_auth_if_needed(session, logger)
         return session
+
+    # Common PSI case: valid cookie + stale/foreign JWT from token.md.
+    if jwt_token and cookie_header:
+        logger.warning("[AUTH] initial auth failed; retrying with cookie-only (without JWT headers)")
+        _drop_token_headers(session)
+        meta["token"] = ""
+        if _auth_test(session, logger):
+            _save_auth_if_needed(session, logger)
+            return session
 
     if auto_jwt and _reauth_session(session, logger):
         return session
