@@ -287,6 +287,9 @@ def _auth_test(session, logger):
         if resp.status_code == 200 and "application/json" in content_type:
             any_json_200 = True
             break
+        preview = (resp.text or "").replace("\r", " ").replace("\n", " ").strip()[:500]
+        if preview:
+            logger.warning("[AUTH TEST] non-success response preview: %s", preview)
     return any_json_200
 
 
