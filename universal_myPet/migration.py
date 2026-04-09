@@ -523,109 +523,144 @@ def apply_uploads_to_doc(session, logger, collection, main_id, guid, doc_state, 
     if not pending_uploads:
         return doc_state
 
+    failed_uploads = []
     for upload in pending_uploads:
         path = upload["path"]
-        source = _upload_source(upload)
-        if source["kind"] == "file":
-            logger.info(
-                "[UPLOAD][file] collection=%s id=%s path=%s file=%s",
+        source = None
+        try:
+            source = _upload_source(upload)
+            if source["kind"] == "file":
+                logger.info(
+                    "[UPLOAD][file] collection=%s id=%s path=%s file=%s",
+                    collection,
+                    main_id,
+                    path,
+                    source["filePath"],
+                )
+                uploaded = upload_file(
+                    session=session,
+                    logger=logger,
+                    file_path=source["filePath"],
+                    entry_name=collection,
+                    entry_id=main_id,
+                    entity_field_path=path,
+                    allow_external=bool(upload.get("allowExternal", False)),
+                )
+            elif source["kind"] == "base64":
+                logger.info(
+                    "[UPLOAD][base64] collection=%s id=%s path=%s fileName=%s",
+                    collection,
+                    main_id,
+                    path,
+                    upload["filename"],
+                )
+                uploaded = upload_file_base64(
+                    session=session,
+                    logger=logger,
+                    entry_name=collection,
+                    entry_id=main_id,
+                    entity_field_path=path,
+                    filename=upload["filename"],
+                    base64_content=upload.get("base64"),
+                )
+            else:
+                raise RuntimeError(
+                    f"No upload source for path={path}, file={upload.get('filename')}. "
+                    f"Add file to files/ or provide base64."
+                )
+
+            up = uploaded.get("data") if isinstance(uploaded, dict) else uploaded
+            if not isinstance(up, dict):
+                up = {}
+
+            up_id = up.get("id")
+            server_name = (
+                up.get("originalName")
+                or up.get("name")
+                or (up_id.split("/")[-1] if isinstance(up_id, str) else None)
+                or upload["filename"]
+            )
+            source_size = os.path.getsize(source["filePath"]) if source.get("kind") == "file" else base64_size_bytes(upload.get("base64"))
+            response_file_id = up.get("_id") or up.get("fileId") or up.get("id") or (up_id if isinstance(up_id, str) else "")
+            if not response_file_id:
+                raise ApiCallError(
+                    "Upload response missing file id for path=%s file=%s" % (path, upload.get("filename")),
+                    data=up,
+                )
+            response_size_raw = up.get("size")
+            try:
+                response_size = int(float(response_size_raw)) if response_size_raw is not None else None
+            except Exception:
+                response_size = None
+            if source.get("kind") == "file" and source_size > 0 and response_size is not None and response_size <= 0:
+                raise ApiCallError(
+                    "Upload returned zero size for non-empty file path=%s file=%s" % (path, upload.get("filename")),
+                    code=413,
+                    data=up,
+                )
+
+            file_size_for_meta = response_size if (response_size is not None and response_size > 0) else source_size
+            file_meta = {
+                "_id": response_file_id,
+                "size": file_size_for_meta,
+                "isFile": True,
+                "originalName": server_name,
+                "allowExternal": bool(upload.get("allowExternal", False)),
+                "entityFieldPath": path,
+            }
+            set_by_path(doc_state, path, file_meta)
+            doc_state = update_record(session, logger, collection, main_id, guid, doc_state)
+
+            persisted_meta = get_by_path(doc_state, path)
+            persisted_id = persisted_meta.get("_id") if isinstance(persisted_meta, dict) else None
+            if not persisted_id:
+                raise ApiCallError(
+                    "Uploaded file not persisted with _id path=%s file=%s" % (path, upload.get("filename")),
+                    data={"uploadResponse": up, "persistedMeta": persisted_meta},
+                )
+            persisted_size_raw = persisted_meta.get("size") if isinstance(persisted_meta, dict) else None
+            try:
+                persisted_size = int(float(persisted_size_raw)) if persisted_size_raw is not None else None
+            except Exception:
+                persisted_size = None
+            if source.get("kind") == "file" and source_size > 0 and (persisted_size is None or persisted_size <= 0):
+                raise ApiCallError(
+                    "Uploaded file persisted with zero/missing size path=%s file=%s" % (path, upload.get("filename")),
+                    code=413,
+                    data={"uploadResponse": up, "persistedMeta": persisted_meta},
+                )
+        except Exception as exc:
+            msg = str(exc).lower()
+            is_upload_related = isinstance(exc, ApiCallError) or _is_upload_error(exc) or "upload" in msg or "загруз" in msg
+            if not is_upload_related:
+                raise
+            err = serialize_exception(exc)
+            failed_uploads.append(
+                {
+                    "path": path,
+                    "filename": upload.get("filename"),
+                    "sourceKind": source.get("kind") if isinstance(source, dict) else None,
+                    "error": err,
+                }
+            )
+            logger.error(
+                "[UPLOAD][error] collection=%s id=%s path=%s file=%s err=%s",
                 collection,
                 main_id,
                 path,
-                source["filePath"],
+                upload.get("filename"),
+                json.dumps(err, ensure_ascii=False),
             )
-            uploaded = upload_file(
-                session=session,
-                logger=logger,
-                file_path=source["filePath"],
-                entry_name=collection,
-                entry_id=main_id,
-                entity_field_path=path,
-                allow_external=bool(upload.get("allowExternal", False)),
-            )
-        elif source["kind"] == "base64":
-            logger.info(
-                "[UPLOAD][base64] collection=%s id=%s path=%s fileName=%s",
-                collection,
-                main_id,
-                path,
-                upload["filename"],
-            )
-            uploaded = upload_file_base64(
-                session=session,
-                logger=logger,
-                entry_name=collection,
-                entry_id=main_id,
-                entity_field_path=path,
-                filename=upload["filename"],
-                base64_content=upload.get("base64"),
-            )
-        else:
-            raise RuntimeError(
-                f"No upload source for path={path}, file={upload.get('filename')}. "
-                f"Add file to files/ or provide base64."
-            )
+            continue
 
-        up = uploaded.get("data") if isinstance(uploaded, dict) else uploaded
-        if not isinstance(up, dict):
-            up = {}
-
-        up_id = up.get("id")
-        server_name = (
-            up.get("originalName")
-            or up.get("name")
-            or (up_id.split("/")[-1] if isinstance(up_id, str) else None)
-            or upload["filename"]
+    if failed_uploads:
+        first = failed_uploads[0].get("error")
+        code = first.get("code") if isinstance(first, dict) else None
+        raise ApiCallError(
+            "Upload failed for one or more files",
+            code=code,
+            data={"failedUploads": failed_uploads},
         )
-        source_size = os.path.getsize(source["filePath"]) if source.get("kind") == "file" else base64_size_bytes(upload.get("base64"))
-        response_file_id = up.get("_id") or up.get("fileId") or up.get("id") or (up_id if isinstance(up_id, str) else "")
-        if not response_file_id:
-            raise ApiCallError(
-                "Upload response missing file id for path=%s file=%s" % (path, upload.get("filename")),
-                data=up,
-            )
-        response_size_raw = up.get("size")
-        try:
-            response_size = int(float(response_size_raw)) if response_size_raw is not None else None
-        except Exception:
-            response_size = None
-        if source.get("kind") == "file" and source_size > 0 and response_size is not None and response_size <= 0:
-            raise ApiCallError(
-                "Upload returned zero size for non-empty file path=%s file=%s" % (path, upload.get("filename")),
-                code=413,
-                data=up,
-            )
-
-        file_size_for_meta = response_size if (response_size is not None and response_size > 0) else source_size
-        file_meta = {
-            "_id": response_file_id,
-            "size": file_size_for_meta,
-            "isFile": True,
-            "originalName": server_name,
-            "allowExternal": bool(upload.get("allowExternal", False)),
-            "entityFieldPath": path,
-        }
-        set_by_path(doc_state, path, file_meta)
-        doc_state = update_record(session, logger, collection, main_id, guid, doc_state)
-
-        persisted_meta = get_by_path(doc_state, path)
-        persisted_id = persisted_meta.get("_id") if isinstance(persisted_meta, dict) else None
-        if not persisted_id:
-            raise ApiCallError(
-                "Uploaded file not persisted with _id path=%s file=%s" % (path, upload.get("filename")),
-                data={"uploadResponse": up, "persistedMeta": persisted_meta},
-            )
-        persisted_size_raw = persisted_meta.get("size") if isinstance(persisted_meta, dict) else None
-        try:
-            persisted_size = int(float(persisted_size_raw)) if persisted_size_raw is not None else None
-        except Exception:
-            persisted_size = None
-        if source.get("kind") == "file" and source_size > 0 and (persisted_size is None or persisted_size <= 0):
-            raise ApiCallError(
-                "Uploaded file persisted with zero/missing size path=%s file=%s" % (path, upload.get("filename")),
-                code=413,
-                data={"uploadResponse": up, "persistedMeta": persisted_meta},
-            )
 
     return doc_state
 

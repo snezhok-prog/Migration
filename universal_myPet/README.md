@@ -28,6 +28,7 @@
   - включает operator-flow (retry/skip/abort) по ошибкам строк.
 - В неинтерактивном запуске (`--no-interactive`) operator prompts отключены.
 - Ошибки загрузки файлов (включая `413 Request Entity Too Large`) явно попадают в `Errors` и в `fail_log`.
+- При частичных upload-ошибках скрипт продолжает попытки загрузки остальных файлов строки, а затем возвращает агрегированную ошибку по неуспешным файлам.
 
 ## Быстрый старт
 
@@ -90,12 +91,10 @@ python migration.py --profile custom --base-url "https://your-stand" --jwt-url "
 - убедитесь, что установлен Python и зависимости из `requirements.txt`;
 - запускайте из папки проекта, пути внутри скрипта относительные (привязки к вашему ПК не требуются).
 
-Готовые команды для PSI:
+Базовая команда для PSI:
 
-```bat
-run_psi_auth_only.cmd
-run_psi_migration.cmd
-run_psi_dry_run.cmd
+```bash
+python migration.py --profile psi --no-prompt --no-interactive
 ```
 
 ## Массовая миграция и папки файлов
