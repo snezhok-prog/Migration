@@ -3605,9 +3605,25 @@ def _process_job_with_resume(
     if not pending:
         return False
 
-    def _mark_new_successes(start_idx: int):
+    def _collect_error_rows(start_error_idx: int) -> set:
+        rows_with_errors = set()
+        for err in errors[start_error_idx:]:
+            if not isinstance(err, dict):
+                continue
+            registry_name = str(err.get("registry") or "")
+            if registry_name and registry_name != primary_registry:
+                continue
+            idx = err.get("index")
+            try:
+                rows_with_errors.add(int(idx))
+            except Exception:
+                continue
+        return rows_with_errors
+
+    def _mark_new_successes(start_idx: int, start_error_idx: int):
         if dry_run:
             return
+        rows_with_errors = _collect_error_rows(start_error_idx)
         for item in created_items[start_idx:]:
             if str(item.get("registry") or "") != primary_registry:
                 continue
@@ -3619,6 +3635,14 @@ def _process_job_with_resume(
             try:
                 row_idx_int = int(row_num)
             except Exception:
+                continue
+            if row_idx_int in rows_with_errors:
+                logger.warning(
+                    "[RESUME] row=%s in %s/%s had errors in this run; checkpoint is not saved for automatic skip",
+                    row_idx_int,
+                    workbook_label,
+                    job_name,
+                )
                 continue
             state.mark_success(
                 workbook_path=workbook_key,
@@ -3688,7 +3712,7 @@ def _process_job_with_resume(
                     ok=created_items,
                     fail=errors,
                 )
-                _mark_new_successes(created_before)
+                _mark_new_successes(created_before, errors_before)
                 if stopped:
                     if len(errors) > errors_before:
                         last_err = errors[-1]
@@ -3734,6 +3758,7 @@ def _process_job_with_resume(
         return False
 
     before_len = len(created_items)
+    errors_before = len(errors)
     stopped = process_fn(
         session=session,
         logger=logger,
@@ -3744,7 +3769,7 @@ def _process_job_with_resume(
         ok=created_items,
         fail=errors,
     )
-    _mark_new_successes(before_len)
+    _mark_new_successes(before_len, errors_before)
     return stopped
 
 
