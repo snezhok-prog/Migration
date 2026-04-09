@@ -203,12 +203,31 @@ def _save_auth_if_needed(session, logger):
         logger.warning("[AUTH] failed to persist token/cookie: %s", exc)
 
 
+def _clean_token_for_headers(token):
+    raw = str(token or "").replace("\ufeff", "").strip()
+    if not raw:
+        return ""
+    # PSI expects raw JWT value in `token` and Bearer-form in `Authorization`.
+    # Remove optional Bearer prefix first, then normalize through parser.
+    bearer_clean = re.sub(r"^\s*bearer\s+", "", raw, flags=re.IGNORECASE).strip()
+    return _extract_jwt(bearer_clean)
+
+
 def _apply_token_headers(session, token):
-    clean = _extract_jwt(token)
+    clean = _clean_token_for_headers(token)
     if not clean:
         return
     session.headers["token"] = clean
     session.headers["Authorization"] = "Bearer " + clean
+
+
+def _ensure_auth_headers_from_meta(session):
+    meta = getattr(session, "_auth_meta", None)
+    if not isinstance(meta, dict):
+        return
+    token = str(meta.get("token") or "").strip()
+    if token:
+        _apply_token_headers(session, token)
 
 
 def _apply_cookies(session, cookie_raw, logger):
@@ -284,7 +303,7 @@ def _reauth_session(session, logger):
         return False
 
     _apply_token_headers(session, token)
-    meta["token"] = token
+    meta["token"] = _clean_token_for_headers(token)
     _save_auth_if_needed(session, logger)
     ok = _auth_test(session, logger)
     logger.info("[AUTH] re-auth result: %s", ok)
@@ -321,7 +340,7 @@ def setup_session(
             jwt_input = ""
 
     cookie_header = cookie_input or defaults["cookie"]
-    jwt_token = _extract_jwt(jwt_input or defaults["token"])
+    jwt_token = _clean_token_for_headers(jwt_input or defaults["token"])
 
     if not cookie_header and not jwt_token:
         logger.error("Не переданы ни Cookie, ни JWT token")
@@ -378,6 +397,7 @@ def api_request(session, logger, method, url, reauth_fn=None, max_retries=None, 
 
     response = None
     for _ in range(retries + 1):
+        _ensure_auth_headers_from_meta(session)
         if file_streams:
             _rewind_file_stream_positions(file_streams)
         response = session.request(method=method.upper(), url=url, timeout=120, **kwargs)
