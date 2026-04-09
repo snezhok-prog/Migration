@@ -171,6 +171,15 @@ def _cookie_jar_to_string(cookie_jar):
     return "; ".join(items)
 
 
+def _normalize_raw_cookie_header(raw_cookie):
+    text = str(raw_cookie or "").replace("\ufeff", "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\s*cookie\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = text.replace("\r", " ").replace("\n", " ").strip()
+    return text
+
+
 def _load_default_auth_from_files():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     token_md = os.path.join(script_dir, "token.md")
@@ -231,6 +240,7 @@ def _ensure_auth_headers_from_meta(session):
 
 
 def _apply_cookies(session, cookie_raw, logger):
+    raw_cookie_header = _normalize_raw_cookie_header(cookie_raw)
     pairs = _parse_cookie_pairs(cookie_raw)
     host_match = re.match(r"^https?://([^/:]+)", _RUNTIME_BASE_URL, flags=re.IGNORECASE)
     domain = host_match.group(1) if host_match else ""
@@ -241,7 +251,10 @@ def _apply_cookies(session, cookie_raw, logger):
         else:
             session.cookies.set(name, value, path="/")
         parsed += 1
-    if parsed:
+    if raw_cookie_header:
+        # Keep original cookie string for PSI compatibility (very long PLATFORM_SESSION chains).
+        session.headers["Cookie"] = raw_cookie_header
+    elif parsed:
         session.headers["Cookie"] = "; ".join(["%s=%s" % (k, v) for k, v in pairs])
     logger.info("Parsed cookie pairs: %s", parsed)
     return parsed
