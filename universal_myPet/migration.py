@@ -3475,6 +3475,7 @@ def _process_job_with_resume(
     interactive: bool,
 ) -> bool:
     pending = []
+    resumed_count = 0
     for row in rows:
         row_num = int(row.get("__row_num", 0) or 0)
         state_row = state.get(workbook_key, job_name, row_num)
@@ -3519,8 +3520,27 @@ def _process_job_with_resume(
             }
             created_items.append(resumed)
             _append_unique_rollback(rollback_candidates, resumed)
+            resumed_count += 1
+            logger.info(
+                "[RESUME] %s/%s row=%s skipped (already processed, collection=%s, _id=%s)",
+                workbook_label,
+                job_name,
+                row_num,
+                state_row.get("collection"),
+                state_row.get("_id"),
+            )
         else:
             pending.append(row)
+
+    if resumed_count:
+        logger.info(
+            "[RESUME] %s/%s summary: total=%s resumed=%s pending=%s",
+            workbook_label,
+            job_name,
+            len(rows),
+            resumed_count,
+            len(pending),
+        )
 
     if not pending:
         return False
@@ -3554,7 +3574,7 @@ def _process_job_with_resume(
         while True:
             try:
                 raw = input(
-                    "[ОПЕРАТОР] %s/%s строка=%s: ошибка обработки\nДетали: %s\nДействия: [П]овторить / [Пр]опустить / [О]становить: "
+                    "[ОПЕРАТОР] %s/%s строка=%s: ошибка обработки\nДетали: %s\nДействия: [П]овторить / [Пр]опустить / [О]становить (с сохранением прогресса): "
                     % (workbook_label, job_name, row_num, err_msg)
                 )
             except EOFError:
@@ -3572,7 +3592,7 @@ def _process_job_with_resume(
         while True:
             try:
                 raw = input(
-                    "[ОПЕРАТОР] %s/%s строка=%s: нефатальная ошибка\nДетали: %s\nДействия: [Д]альше / [О]становить: "
+                    "[ОПЕРАТОР] %s/%s строка=%s: нефатальная ошибка\nДетали: %s\nДействия: [Д]альше / [О]становить (с сохранением прогресса): "
                     % (workbook_label, job_name, row_num, err_msg)
                 )
             except EOFError:
@@ -3582,6 +3602,15 @@ def _process_job_with_resume(
                 return "continue"
             if normalized in {"a", "abort", "о", "остановить", "выход", "q", "quit"}:
                 return "abort"
+
+    def _log_operator_stop(row_num: int):
+        logger.warning(
+            "[ОПЕРАТОР] Остановка по решению оператора: %s/%s строка=%s. "
+            "Прогресс сохранен в checkpoints, запуск можно продолжить повторным стартом скрипта.",
+            workbook_label,
+            job_name,
+            row_num,
+        )
 
     if RUNTIME_OPERATOR_MODE and interactive:
         for row in pending:
@@ -3609,6 +3638,7 @@ def _process_job_with_resume(
                             continue
                         if action == "skip":
                             break
+                        _log_operator_stop(row_num)
                         return True
 
                 row_success = False
@@ -3627,6 +3657,7 @@ def _process_job_with_resume(
                     if row_success:
                         action = _operator_row_post_error_action(row_num, last_err.get("error"))
                         if action == "abort":
+                            _log_operator_stop(row_num)
                             return True
                         break
                     action = _operator_row_action(row_num, last_err.get("error"))
@@ -3635,6 +3666,7 @@ def _process_job_with_resume(
                         continue
                     if action == "skip":
                         break
+                    _log_operator_stop(row_num)
                     return True
                 if row_success:
                     break

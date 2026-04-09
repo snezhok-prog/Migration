@@ -120,6 +120,7 @@ python migration.py --profile dev --operator-mode
 - `Пропустить` (`пр`, `skip`)
 - `Дальше` для нефатальных ошибок (`д`, `continue`)
 - `Остановить` (`о`, `abort`)
+- При `Остановить` скрипт явно пишет, что прогресс сохранен в `state/checkpoints.json`, и следующий запуск продолжит с места остановки.
 
 ## Resume / checkpoints
 
