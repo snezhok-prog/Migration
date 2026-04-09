@@ -1,0 +1,32 @@
+2026-04-08 15:06:44,736 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-06-44.txt
+2026-04-08 15:06:44,737 - INFO - Mode: mode=auto dry_run=True auth_only=False skip_auth=True operator_mode=False limit=1 profile=psi base_url=https://pgs-psi-inner.digitalgov-torknd-psi-common.apps.k8s.prod1.pd40.sol.mtp
+2026-04-08 15:06:44,737 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-06-44.txt
+2026-04-08 15:06:44,738 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1 two.xlsm', 'C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-08 15:06:44,743 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1 two.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\two
+2026-04-08 15:06:44,743 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 15:06:44,744 - INFO - Mode: mode=auto dry_run=True auth_only=False skip_auth=True operator_mode=False limit=1 profile=prod base_url=http://pgs-prod-inner.digitalgov-torknd-prod1-common.apps.k8s.prod1.pd40.sol.mtp
+2026-04-08 15:06:44,746 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1 two.xlsm', 'C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-08 15:06:44,746 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1 two.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\two
+2026-04-08 15:06:44,746 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 15:06:44,751 - INFO - Resume: enabled=False state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=psi|https://pgs-psi-inner.digitalgov-torknd-psi-common.apps.k8s.prod1.pd40.sol.mtp|universal-my-pet
+2026-04-08 15:06:44,751 - INFO - Resume: enabled=False state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=prod|http://pgs-prod-inner.digitalgov-torknd-prod1-common.apps.k8s.prod1.pd40.sol.mtp|universal-my-pet
+2026-04-08 15:06:44,752 - INFO - Auth skipped (--skip-auth)
+2026-04-08 15:06:44,752 - INFO - Auth skipped (--skip-auth)
+2026-04-08 15:06:45,834 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1 two.xlsm
+2026-04-08 15:06:45,834 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 15:06:45,861 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1 two.xlsm
+2026-04-08 15:06:45,861 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 15:06:45,889 - INFO - [EXCEL] parsed rows: catch=1 stray=1 card=1
+2026-04-08 15:06:45,890 - INFO - [DRY] workbook=Форма_для_миграции_Мой_питомец_136_1 two.xlsm rows: catch=1 stray=1 card=1 files_dir=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\two
+2026-04-08 15:06:45,912 - INFO - [EXCEL] parsed rows: catch=1 stray=1 card=1
+2026-04-08 15:06:45,912 - INFO - [DRY] workbook=Форма_для_миграции_Мой_питомец_136_1 two.xlsm rows: catch=1 stray=1 card=1 files_dir=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\two
+2026-04-08 15:06:46,793 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 15:06:46,793 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 15:06:46,808 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 15:06:46,809 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 15:06:46,847 - INFO - [EXCEL] parsed rows: catch=1 stray=1 card=1
+2026-04-08 15:06:46,847 - INFO - [DRY] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm rows: catch=1 stray=1 card=1 files_dir=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 15:06:46,847 - INFO - Dry-run completed
+2026-04-08 15:06:46,858 - INFO - [EXCEL] parsed rows: catch=1 stray=1 card=1
+2026-04-08 15:06:46,858 - INFO - [DRY] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm rows: catch=1 stray=1 card=1 files_dir=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 15:06:46,858 - INFO - Dry-run completed

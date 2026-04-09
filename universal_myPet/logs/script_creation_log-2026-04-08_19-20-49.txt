@@ -1,0 +1,81 @@
+2026-04-08 19:20:49,437 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_19-20-49.txt
+2026-04-08 19:20:49,439 - INFO - Mode: mode=single dry_run=False auth_only=False skip_auth=False operator_mode=True limit=1 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 19:20:49,440 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-08 19:20:49,441 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 19:20:49,453 - INFO - State reset completed for namespace
+2026-04-08 19:20:49,453 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 19:20:49,456 - INFO - Parsed cookie pairs: 3
+2026-04-08 19:20:49,879 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 19:20:49,881 - INFO - [AUTH] token/cookie files updated
+2026-04-08 19:20:49,881 - INFO - Processing workbook: C:\Услуги\ветеренария\Миграция возвращение\Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 19:20:51,928 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 19:20:51,928 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 19:20:52,004 - INFO - [EXCEL] parsed rows: catch=2 stray=2 card=2
+2026-04-08 19:20:52,004 - INFO - [INPUT] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm rows summary: catch=1 stray=1 card=1
+2026-04-08 19:20:52,004 - INFO - [CATCH-ORDER] start rows=1
+2026-04-08 19:20:52,683 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 19:20:52,756 - WARNING - [ORG-LOOKUP][catchOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 19:20:52,928 - INFO - [UPLOAD][file] collection=animalCatchOrderRegistryCollection id=69d680648cfb8c55ceeff8ca path=animal[0].photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная собака.png
+2026-04-08 19:20:53,194 - ERROR - [CATCH-ORDER] row error: 6 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 19:20:53,195 - INFO - [STRAY] start rows=1
+2026-04-08 19:20:53,394 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 19:20:53,453 - WARNING - [ORG-LOOKUP][catchOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 19:20:53,811 - INFO - [UPLOAD][file] collection=animalsRecordsCollectionTwo id=69d680658cfb8c55ceeff8cc path=animal.photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная собака.png
+2026-04-08 19:20:54,099 - ERROR - [STRAY] row error: 6 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 19:20:54,292 - INFO - [VERIFY] checked=2 missing_or_error=0
+2026-04-08 19:20:54,292 - INFO - ===== DONE =====
+2026-04-08 19:20:54,292 - INFO - Created: [
+  {
+    "registry": "catch-order",
+    "index": 6,
+    "orderNumber": 200000,
+    "_id": "69d680648cfb8c55ceeff8ca",
+    "guid": "ea74fe84-b2f9-4da1-85ec-28127d899282",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "registry": "stray",
+    "index": 6,
+    "animalNumber": "00000590-1",
+    "_id": "69d680658cfb8c55ceeff8cc",
+    "guid": "5f9f2efb-b45f-46cb-8419-04bae6e18e5b",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  }
+]
+2026-04-08 19:20:54,292 - INFO - Errors: [
+  {
+    "registry": "catch-order",
+    "index": 6,
+    "orderNumber": 200000,
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  },
+  {
+    "registry": "stray",
+    "index": 6,
+    "animalNumber": "00000590-1",
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  }
+]
+2026-04-08 19:20:54,292 - INFO - ===== ROLLBACK BODY (final-summary) =====
+[
+  {
+    "_id": "69d680648cfb8c55ceeff8ca",
+    "guid": "ea74fe84-b2f9-4da1-85ec-28127d899282",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "_id": "69d680658cfb8c55ceeff8cc",
+    "guid": "5f9f2efb-b45f-46cb-8419-04bae6e18e5b",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  }
+]
+===== /ROLLBACK BODY =====
+2026-04-08 19:20:54,293 - WARNING - Processing stopped due to configured stop flags

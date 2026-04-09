@@ -1,0 +1,1 @@
+{"registry": "catch-order", "index": 1, "orderNumber": 999001, "error": "No upload source for path=animal[0].photo[0], file=__missing_operator_test__.pdf. Add file to files/ or provide base64."}

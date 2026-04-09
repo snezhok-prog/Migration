@@ -1,0 +1,293 @@
+2026-04-08 18:13:26,860 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_18-13-26.txt
+2026-04-08 18:13:26,861 - INFO - Mode: mode=auto dry_run=False auth_only=False skip_auth=False operator_mode=False limit=0 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 18:13:26,862 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-08 18:13:26,862 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 18:13:26,863 - INFO - State reset completed for namespace
+2026-04-08 18:13:26,863 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 18:13:26,864 - INFO - Parsed cookie pairs: 3
+2026-04-08 18:13:27,040 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 18:13:27,042 - INFO - [AUTH] token/cookie files updated
+2026-04-08 18:13:27,042 - INFO - Processing workbook: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 18:13:28,012 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 18:13:28,012 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 18:13:28,055 - INFO - [EXCEL] parsed rows: catch=2 stray=2 card=2
+2026-04-08 18:13:28,055 - INFO - [INPUT] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm rows summary: catch=2 stray=2 card=2
+2026-04-08 18:13:28,055 - INFO - [CATCH-ORDER] start rows=2
+2026-04-08 18:13:28,191 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 18:13:28,247 - WARNING - [ORG-LOOKUP][catchOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 18:13:28,661 - INFO - [UPLOAD][file] collection=animalCatchOrderRegistryCollection id=69d670988cfb8c55ceefe6fd path=animal[0].photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная собака.png
+2026-04-08 18:13:28,882 - ERROR - [CATCH-ORDER] row error: 6 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 18:13:28,945 - WARNING - [ORG-LOOKUP][authorizedOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 18:13:29,057 - INFO - [ORG-LOOKUP][catchOrg] found (ogrn). id=5fdb08024002240001ed8eb4
+2026-04-08 18:13:29,775 - INFO - [UPLOAD][file] collection=animalCatchOrderRegistryCollection id=69d670988cfb8c55ceefe6ff path=animal[0].photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная кошка 2.png
+2026-04-08 18:13:30,140 - ERROR - [CATCH-ORDER] row error: 7 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 18:13:30,142 - INFO - [STRAY] start rows=2
+2026-04-08 18:13:30,201 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 18:13:30,309 - WARNING - [ORG-LOOKUP][catchOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 18:13:30,658 - INFO - [UPLOAD][file] collection=animalsRecordsCollectionTwo id=69d6709a8cfb8c55ceefe701 path=animal.photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная собака.png
+2026-04-08 18:13:30,921 - ERROR - [STRAY] row error: 6 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 18:13:30,990 - WARNING - [ORG-LOOKUP][authorizedOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 18:13:31,162 - INFO - [ORG-LOOKUP][catchOrg] found (ogrn). id=5fdb08024002240001ed8eb4
+2026-04-08 18:13:31,389 - INFO - [UPLOAD][file] collection=animalsRecordsCollectionTwo id=69d6709a8cfb8c55ceefe703 path=animal.photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная кошка 2.png
+2026-04-08 18:13:31,689 - ERROR - [STRAY] row error: 7 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 18:13:31,691 - INFO - [CARD] start rows=2
+2026-04-08 18:13:31,754 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 18:13:31,807 - WARNING - [ORG-LOOKUP][shelterOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 18:13:32,116 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709b8cfb8c55ceefe705 path=animal.photo file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорный щенок.png
+2026-04-08 18:13:32,354 - ERROR - [CARD] row error: 6 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}
+2026-04-08 18:13:32,410 - WARNING - [ORG-LOOKUP][authorizedOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 18:13:32,541 - INFO - [ORG-LOOKUP][shelterOrg] found (ogrn). id=5fdb08024002240001ed8eb4
+2026-04-08 18:13:32,994 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=animal.photo file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\тест собака большая на остановке.jpg
+2026-04-08 18:13:33,499 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[0].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:33,884 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[1].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:34,299 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[2].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:34,758 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[3].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:35,191 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[4].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:35,543 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[5].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:36,346 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[6].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:36,779 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[7].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:37,405 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[8].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:37,843 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[0].deworming[9].dewormingActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:38,282 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[0].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:38,777 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[1].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:39,162 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[2].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:39,546 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[3].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:39,966 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[4].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:40,464 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[5].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:40,896 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[6].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:41,409 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[7].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:41,958 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[8].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:42,836 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[1].disinsection[9].disinsectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:43,309 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[0].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:44,209 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[1].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:44,701 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[2].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:45,099 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[3].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:45,507 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[4].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:45,871 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[5].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:46,741 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[6].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:47,159 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[7].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:47,568 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[8].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:47,984 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[2].vaccination[9].vaccinationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:48,369 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[3].sterilization.sterilizationActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:48,789 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[5].inspection.inspectionActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:49,227 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[6].euthanasia.euthanasiaActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:49,705 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[7].disposal.disposalActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:50,100 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[0].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:50,530 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[1].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:51,068 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[2].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:51,561 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[3].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:51,945 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[4].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:52,339 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[5].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:52,890 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[6].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:53,436 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[7].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:53,838 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[8].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:54,415 - INFO - [UPLOAD][file] collection=myPetAnimalCardReestr id=69d6709c09f3b1a15490a7f0 path=events[8].other[9].otherEventDocumentFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:55,400 - INFO - [UPLOAD][file] collection=animalTransferActRegistryCollection id=69d670b28cfb8c55ceefe74d path=transferActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\test.pdf
+2026-04-08 18:13:56,295 - INFO - [UPLOAD][file] collection=animalTransferActRegistryCollection id=69d670b309f3b1a15490a836 path=transferActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:57,166 - INFO - [UPLOAD][file] collection=animalReleaseActRegistryEntry id=69d670b48cfb8c55ceefe755 path=shelterData.releaseActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:57,631 - INFO - [UPLOAD][file] collection=animalReleaseActRegistryEntry id=69d670b48cfb8c55ceefe755 path=temporaryHoldingFacilityData.releaseActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:58,405 - INFO - [UPLOAD][file] collection=animalReleaseActRegistryEntry id=69d670b58cfb8c55ceefe75d path=actData.deathActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:13:59,063 - INFO - [UPLOAD][file] collection=animalReleaseActRegistryEntry id=69d670b609f3b1a15490a83c path=actData.transferActFile[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\namefile.pdf
+2026-04-08 18:14:00,477 - INFO - [VERIFY] checked=11 missing_or_error=0
+2026-04-08 18:14:00,477 - INFO - ===== DONE =====
+2026-04-08 18:14:00,477 - INFO - Created: [
+  {
+    "registry": "catch-order",
+    "index": 6,
+    "orderNumber": 200000,
+    "_id": "69d670988cfb8c55ceefe6fd",
+    "guid": "365e975b-9a8f-4999-a773-962cfefc9a3c",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "registry": "catch-order",
+    "index": 7,
+    "orderNumber": 19999,
+    "_id": "69d670988cfb8c55ceefe6ff",
+    "guid": "c1573d13-d1db-4134-9be5-9119878f5b2f",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "registry": "stray",
+    "index": 6,
+    "animalNumber": "00000590-1",
+    "_id": "69d6709a8cfb8c55ceefe701",
+    "guid": "3ff3b242-e071-4981-a064-1bf02d7bbc39",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  },
+  {
+    "registry": "stray",
+    "index": 7,
+    "animalNumber": "00000590-2",
+    "_id": "69d6709a8cfb8c55ceefe703",
+    "guid": "f06f48ac-b733-4082-9245-96c24af556a7",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  },
+  {
+    "registry": "card",
+    "index": 6,
+    "cardNumber": 42352345234,
+    "_id": "69d6709b8cfb8c55ceefe705",
+    "guid": "9c0aa501-6dc2-4a87-b842-f116d39acf02",
+    "parentEntries": "myPetAnimalCardReestr"
+  },
+  {
+    "registry": "card",
+    "index": 7,
+    "cardNumber": 412342314,
+    "_id": "69d6709c09f3b1a15490a7f0",
+    "guid": "4ba06be9-5a0b-420e-b6ae-4e28665d2d0f",
+    "parentEntries": "myPetAnimalCardReestr"
+  },
+  {
+    "registry": "handover-with-catcher",
+    "index": 7,
+    "cardNumber": 412342314,
+    "_id": "69d670b28cfb8c55ceefe74d",
+    "guid": "167e23ab-3ee6-445d-8ac8-316adbe795f5",
+    "parentEntries": "animalTransferActRegistryCollection"
+  },
+  {
+    "registry": "handover-with-shelter",
+    "index": 7,
+    "cardNumber": 412342314,
+    "_id": "69d670b309f3b1a15490a836",
+    "guid": "f8330d19-aed0-4263-b237-98ef4510e09d",
+    "parentEntries": "animalTransferActRegistryCollection"
+  },
+  {
+    "registry": "release-act",
+    "index": 7,
+    "cardNumber": 412342314,
+    "_id": "69d670b48cfb8c55ceefe755",
+    "guid": "cb3e065a-886b-4e49-827b-421400ff6897",
+    "parentEntries": "animalReleaseActRegistryEntry"
+  },
+  {
+    "registry": "death-act",
+    "index": 7,
+    "cardNumber": 412342314,
+    "_id": "69d670b58cfb8c55ceefe75d",
+    "guid": "a46eefe2-edb4-415f-a8dd-5765d4359bdf",
+    "parentEntries": "animalReleaseActRegistryEntry"
+  },
+  {
+    "registry": "transfer-owner-act",
+    "index": 7,
+    "cardNumber": 412342314,
+    "_id": "69d670b609f3b1a15490a83c",
+    "guid": "4253711d-577a-441f-bd92-26bf70a49d86",
+    "parentEntries": "animalReleaseActRegistryEntry"
+  }
+]
+2026-04-08 18:14:00,477 - INFO - Errors: [
+  {
+    "registry": "catch-order",
+    "index": 6,
+    "orderNumber": 200000,
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  },
+  {
+    "registry": "catch-order",
+    "index": 7,
+    "orderNumber": 19999,
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  },
+  {
+    "registry": "stray",
+    "index": 6,
+    "animalNumber": "00000590-1",
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  },
+  {
+    "registry": "stray",
+    "index": 7,
+    "animalNumber": "00000590-2",
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  },
+  {
+    "registry": "card",
+    "index": 6,
+    "cardNumber": 42352345234,
+    "error": {
+      "message": "Upload file failed: HTTP 413",
+      "code": 413,
+      "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+    }
+  }
+]
+2026-04-08 18:14:00,477 - INFO - ===== ROLLBACK BODY (final-summary) =====
+[
+  {
+    "_id": "69d670988cfb8c55ceefe6fd",
+    "guid": "365e975b-9a8f-4999-a773-962cfefc9a3c",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "_id": "69d670988cfb8c55ceefe6ff",
+    "guid": "c1573d13-d1db-4134-9be5-9119878f5b2f",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "_id": "69d6709a8cfb8c55ceefe701",
+    "guid": "3ff3b242-e071-4981-a064-1bf02d7bbc39",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  },
+  {
+    "_id": "69d6709a8cfb8c55ceefe703",
+    "guid": "f06f48ac-b733-4082-9245-96c24af556a7",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  },
+  {
+    "_id": "69d6709b8cfb8c55ceefe705",
+    "guid": "9c0aa501-6dc2-4a87-b842-f116d39acf02",
+    "parentEntries": "myPetAnimalCardReestr"
+  },
+  {
+    "_id": "69d6709c09f3b1a15490a7f0",
+    "guid": "4ba06be9-5a0b-420e-b6ae-4e28665d2d0f",
+    "parentEntries": "myPetAnimalCardReestr"
+  },
+  {
+    "_id": "69d670b28cfb8c55ceefe74d",
+    "guid": "167e23ab-3ee6-445d-8ac8-316adbe795f5",
+    "parentEntries": "animalTransferActRegistryCollection"
+  },
+  {
+    "_id": "69d670b309f3b1a15490a836",
+    "guid": "f8330d19-aed0-4263-b237-98ef4510e09d",
+    "parentEntries": "animalTransferActRegistryCollection"
+  },
+  {
+    "_id": "69d670b48cfb8c55ceefe755",
+    "guid": "cb3e065a-886b-4e49-827b-421400ff6897",
+    "parentEntries": "animalReleaseActRegistryEntry"
+  },
+  {
+    "_id": "69d670b58cfb8c55ceefe75d",
+    "guid": "a46eefe2-edb4-415f-a8dd-5765d4359bdf",
+    "parentEntries": "animalReleaseActRegistryEntry"
+  },
+  {
+    "_id": "69d670b609f3b1a15490a83c",
+    "guid": "4253711d-577a-441f-bd92-26bf70a49d86",
+    "parentEntries": "animalReleaseActRegistryEntry"
+  }
+]
+===== /ROLLBACK BODY =====

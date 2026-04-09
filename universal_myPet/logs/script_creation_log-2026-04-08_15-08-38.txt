@@ -1,0 +1,118 @@
+2026-04-08 15:08:38,479 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-08-38.txt
+2026-04-08 15:08:38,480 - INFO - Mode: mode=mass dry_run=False auth_only=False skip_auth=False operator_mode=False limit=1 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 15:08:38,481 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1 two.xlsm', 'C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-08 15:08:38,487 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1 two.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\two
+2026-04-08 15:08:38,487 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 15:08:38,494 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 15:08:38,495 - INFO - Parsed cookie pairs: 3
+2026-04-08 15:08:38,713 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 15:08:38,714 - INFO - [AUTH] token/cookie files updated
+2026-04-08 15:08:38,715 - INFO - Processing workbook: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\Форма_для_миграции_Мой_питомец_136_1 two.xlsm
+2026-04-08 15:08:39,694 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1 two.xlsm
+2026-04-08 15:08:39,694 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 15:08:39,735 - INFO - [EXCEL] parsed rows: catch=1 stray=1 card=1
+2026-04-08 15:08:39,735 - INFO - [INPUT] workbook=Форма_для_миграции_Мой_питомец_136_1 two.xlsm rows summary: catch=1 stray=1 card=1
+2026-04-08 15:08:40,032 - INFO - Processing workbook: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 15:08:40,814 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 15:08:40,814 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 15:08:40,861 - INFO - [EXCEL] parsed rows: catch=1 stray=1 card=1
+2026-04-08 15:08:40,861 - INFO - [INPUT] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm rows summary: catch=1 stray=1 card=1
+2026-04-08 15:08:41,484 - INFO - [VERIFY] checked=6 missing_or_error=0
+2026-04-08 15:08:41,484 - INFO - ===== DONE =====
+2026-04-08 15:08:41,484 - INFO - Created: [
+  {
+    "workbook": "Форма_для_миграции_Мой_питомец_136_1 two.xlsm",
+    "job": "catch_orders",
+    "index": 6,
+    "_id": "69d644fb8cfb8c55ceefd903",
+    "guid": "00dbb993-e0d8-462f-a2d1-ea2ad019de5a",
+    "parentEntries": "animalCatchOrderRegistryCollection",
+    "registry": "catch-order",
+    "resumed": true
+  },
+  {
+    "workbook": "Форма_для_миграции_Мой_питомец_136_1 two.xlsm",
+    "job": "stray_animals",
+    "index": 6,
+    "_id": "69d644fc8cfb8c55ceefd906",
+    "guid": "6db1d099-8fe9-49a2-b978-315516de1388",
+    "parentEntries": "animalsRecordsCollectionTwo",
+    "registry": "stray",
+    "resumed": true
+  },
+  {
+    "workbook": "Форма_для_миграции_Мой_питомец_136_1 two.xlsm",
+    "job": "animal_cards",
+    "index": 6,
+    "_id": "69d644fe09f3b1a154909ad1",
+    "guid": "97bc4614-135f-41be-aece-249d70736d82",
+    "parentEntries": "myPetAnimalCardReestr",
+    "registry": "card",
+    "resumed": true
+  },
+  {
+    "workbook": "Форма_для_миграции_Мой_питомец_136_1.xlsm",
+    "job": "catch_orders",
+    "index": 6,
+    "_id": "69d6451a8cfb8c55ceefd96c",
+    "guid": "a57bb68d-0316-4f85-ab06-23a975f3e1bc",
+    "parentEntries": "animalCatchOrderRegistryCollection",
+    "registry": "catch-order",
+    "resumed": true
+  },
+  {
+    "workbook": "Форма_для_миграции_Мой_питомец_136_1.xlsm",
+    "job": "stray_animals",
+    "index": 6,
+    "_id": "69d6451b09f3b1a154909b20",
+    "guid": "2135f274-e535-46e5-bd08-ddb53651fefc",
+    "parentEntries": "animalsRecordsCollectionTwo",
+    "registry": "stray",
+    "resumed": true
+  },
+  {
+    "workbook": "Форма_для_миграции_Мой_питомец_136_1.xlsm",
+    "job": "animal_cards",
+    "index": 6,
+    "_id": "69d6451d8cfb8c55ceefd97a",
+    "guid": "7ec56932-6fa2-4bb6-b8cb-2ee88d588805",
+    "parentEntries": "myPetAnimalCardReestr",
+    "registry": "card",
+    "resumed": true
+  }
+]
+2026-04-08 15:08:41,484 - INFO - Errors: []
+2026-04-08 15:08:41,485 - INFO - ===== ROLLBACK BODY (final-summary) =====
+[
+  {
+    "_id": "69d644fb8cfb8c55ceefd903",
+    "guid": "00dbb993-e0d8-462f-a2d1-ea2ad019de5a",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "_id": "69d644fc8cfb8c55ceefd906",
+    "guid": "6db1d099-8fe9-49a2-b978-315516de1388",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  },
+  {
+    "_id": "69d644fe09f3b1a154909ad1",
+    "guid": "97bc4614-135f-41be-aece-249d70736d82",
+    "parentEntries": "myPetAnimalCardReestr"
+  },
+  {
+    "_id": "69d6451a8cfb8c55ceefd96c",
+    "guid": "a57bb68d-0316-4f85-ab06-23a975f3e1bc",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  },
+  {
+    "_id": "69d6451b09f3b1a154909b20",
+    "guid": "2135f274-e535-46e5-bd08-ddb53651fefc",
+    "parentEntries": "animalsRecordsCollectionTwo"
+  },
+  {
+    "_id": "69d6451d8cfb8c55ceefd97a",
+    "guid": "7ec56932-6fa2-4bb6-b8cb-2ee88d588805",
+    "parentEntries": "myPetAnimalCardReestr"
+  }
+]
+===== /ROLLBACK BODY =====

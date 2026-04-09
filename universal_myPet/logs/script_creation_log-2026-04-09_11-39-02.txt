@@ -1,0 +1,12 @@
+2026-04-09 11:39:02,667 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-09_11-39-02.txt
+2026-04-09 11:39:02,669 - INFO - Mode: mode=auto dry_run=False auth_only=False skip_auth=False operator_mode=True limit=0 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-09 11:39:06,231 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\universal_myPet\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-09 11:39:06,237 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-09 11:39:06,238 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-09 11:39:08,451 - INFO - Parsed cookie pairs: 3
+2026-04-09 11:39:08,567 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 401
+2026-04-09 11:39:08,579 - INFO - [AUTH][JWT] GET https://iam.torknd-customer.dev.pd15.digitalgov.mtp/jwt/ -> 401
+2026-04-09 11:39:08,590 - INFO - [AUTH][JWT] GET https://iam.torknd-customer.dev.pd15.digitalgov.mtp/jwt/?access=1 -> 401
+2026-04-09 11:39:08,590 - WARNING - [AUTH] auto-jwt failed: token not found
+2026-04-09 11:39:08,591 - ERROR - Authorization failed. Update cookie/token and try again.
+2026-04-09 11:39:08,592 - ERROR - Authorization failed, exiting

@@ -1,0 +1,60 @@
+2026-04-08 15:01:11,891 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-01-11.txt
+2026-04-08 15:01:11,892 - INFO - Mode: mode=single dry_run=False auth_only=False skip_auth=False operator_mode=True limit=1 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 15:01:11,893 - INFO - Selected workbooks: -
+2026-04-08 15:01:11,902 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 15:01:11,904 - INFO - Parsed cookie pairs: 3
+2026-04-08 15:01:12,101 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 15:01:12,102 - INFO - [AUTH] token/cookie files updated
+2026-04-08 15:01:12,103 - INFO - [INPUT] catch files: ['catch_orders_registry_part1.json']
+2026-04-08 15:01:12,103 - INFO - [INPUT] stray files: -
+2026-04-08 15:01:12,103 - INFO - [INPUT] card files: -
+2026-04-08 15:01:12,104 - INFO - [CATCH] file=catch_orders_registry_part1.json rows=1
+2026-04-08 15:01:12,104 - INFO - [CATCH] total rows=1
+2026-04-08 15:01:12,104 - INFO - [CATCH-ORDER] start rows=1
+2026-04-08 15:01:12,332 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 15:01:12,728 - ERROR - [CATCH-ORDER] row error: 1
+Traceback (most recent call last):
+  File "C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\migration.py", line 1523, in process_order_rows
+    apply_uploads_to_doc(
+    ~~~~~~~~~~~~~~~~~~~~^
+        session=session,
+        ^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+        pending_uploads=built["pendingUploads"],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\migration.py", line 552, in apply_uploads_to_doc
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: No upload source for path=animal[0].photo[0], file=__missing_operator_test__.pdf. Add file to files/ or provide base64.
+2026-04-08 15:01:12,804 - INFO - [VERIFY] checked=1 missing_or_error=0
+2026-04-08 15:01:12,804 - INFO - ===== DONE =====
+2026-04-08 15:01:12,804 - INFO - Created: [
+  {
+    "registry": "catch-order",
+    "index": 1,
+    "orderNumber": 999001,
+    "_id": "69d643888cfb8c55ceefd841",
+    "guid": "c72e21bd-8cb2-4b85-848b-d9c4473cd631",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  }
+]
+2026-04-08 15:01:12,804 - INFO - Errors: [
+  {
+    "registry": "catch-order",
+    "index": 1,
+    "orderNumber": 999001,
+    "error": "No upload source for path=animal[0].photo[0], file=__missing_operator_test__.pdf. Add file to files/ or provide base64."
+  }
+]
+2026-04-08 15:01:12,804 - INFO - ===== ROLLBACK BODY (final-summary) =====
+[
+  {
+    "_id": "69d643888cfb8c55ceefd841",
+    "guid": "c72e21bd-8cb2-4b85-848b-d9c4473cd631",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  }
+]
+===== /ROLLBACK BODY =====

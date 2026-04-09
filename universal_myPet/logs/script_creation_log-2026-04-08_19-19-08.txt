@@ -1,0 +1,24 @@
+2026-04-08 19:19:08,568 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_19-19-08.txt
+2026-04-08 19:19:08,569 - INFO - Starting clear collections
+2026-04-08 19:19:08,569 - INFO - Profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 19:19:08,569 - INFO - Collections=['animalCatchOrderRegistryCollection', 'animalsRecordsCollectionTwo', 'myPetAnimalCardReestr', 'animalCatchActRegistryCollection', 'animalReleaseActRegistryEntry', 'animalTransferActRegistryCollection']
+2026-04-08 19:19:08,570 - INFO - Dry run=False
+2026-04-08 19:19:08,575 - INFO - Parsed cookie pairs: 3
+2026-04-08 19:19:08,766 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 19:19:08,768 - INFO - [AUTH] token/cookie files updated
+2026-04-08 19:19:08,768 - INFO - === PURGE animalCatchOrderRegistryCollection ===
+2026-04-08 19:19:09,053 - INFO - [animalCatchOrderRegistryCollection] found=1
+2026-04-08 19:19:09,259 - INFO - Delete animalCatchOrderRegistryCollection/69d67fc68cfb8c55ceeff8c5 finished with status 204
+2026-04-08 19:19:09,259 - INFO - === PURGE animalsRecordsCollectionTwo ===
+2026-04-08 19:19:09,326 - INFO - [animalsRecordsCollectionTwo] found=1
+2026-04-08 19:19:09,425 - INFO - Delete animalsRecordsCollectionTwo/69d67fc709f3b1a15490b6b3 finished with status 204
+2026-04-08 19:19:09,425 - INFO - === PURGE myPetAnimalCardReestr ===
+2026-04-08 19:19:09,508 - INFO - [myPetAnimalCardReestr] found=1
+2026-04-08 19:19:09,665 - INFO - Delete myPetAnimalCardReestr/69d67fc809f3b1a15490b6b5 finished with status 204
+2026-04-08 19:19:09,665 - INFO - === PURGE animalCatchActRegistryCollection ===
+2026-04-08 19:19:09,729 - INFO - [animalCatchActRegistryCollection] found=0
+2026-04-08 19:19:09,729 - INFO - === PURGE animalReleaseActRegistryEntry ===
+2026-04-08 19:19:09,803 - INFO - [animalReleaseActRegistryEntry] found=0
+2026-04-08 19:19:09,803 - INFO - === PURGE animalTransferActRegistryCollection ===
+2026-04-08 19:19:09,870 - INFO - [animalTransferActRegistryCollection] found=0
+2026-04-08 19:19:09,870 - INFO - Clear done. deleted=3 failed=0

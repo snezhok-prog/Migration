@@ -1,0 +1,7 @@
+2026-04-08 18:54:23,740 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_18-54-23.txt
+2026-04-08 18:54:23,742 - INFO - Parsed cookie pairs: 3
+2026-04-08 18:54:23,832 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 401
+2026-04-08 18:54:23,841 - INFO - [AUTH][JWT] GET https://iam.torknd-customer.dev.pd15.digitalgov.mtp/jwt/ -> 401
+2026-04-08 18:54:23,851 - INFO - [AUTH][JWT] GET https://iam.torknd-customer.dev.pd15.digitalgov.mtp/jwt/?access=1 -> 401
+2026-04-08 18:54:23,851 - WARNING - [AUTH] auto-jwt failed: token not found
+2026-04-08 18:54:23,851 - ERROR - Authorization failed. Update cookie/token and try again.

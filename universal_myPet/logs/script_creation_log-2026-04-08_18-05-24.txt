@@ -1,0 +1,32 @@
+2026-04-08 18:05:24,831 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_18-05-24.txt
+2026-04-08 18:05:24,831 - INFO - Starting clear collections
+2026-04-08 18:05:24,831 - INFO - Profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 18:05:24,831 - INFO - Collections=['animalCatchOrderRegistryCollection', 'animalsRecordsCollectionTwo', 'myPetAnimalCardReestr', 'animalCatchActRegistryCollection', 'animalReleaseActRegistryEntry', 'animalTransferActRegistryCollection']
+2026-04-08 18:05:24,831 - INFO - Dry run=False
+2026-04-08 18:05:24,833 - INFO - Parsed cookie pairs: 3
+2026-04-08 18:05:24,993 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 18:05:24,994 - INFO - [AUTH] token/cookie files updated
+2026-04-08 18:05:24,994 - INFO - === PURGE animalCatchOrderRegistryCollection ===
+2026-04-08 18:05:25,201 - INFO - [animalCatchOrderRegistryCollection] found=2
+2026-04-08 18:05:25,342 - INFO - Delete animalCatchOrderRegistryCollection/69d66e088cfb8c55ceefe55a finished with status 204
+2026-04-08 18:05:25,519 - INFO - Delete animalCatchOrderRegistryCollection/69d66e0909f3b1a15490a6b7 finished with status 204
+2026-04-08 18:05:25,519 - INFO - === PURGE animalsRecordsCollectionTwo ===
+2026-04-08 18:05:25,609 - INFO - [animalsRecordsCollectionTwo] found=2
+2026-04-08 18:05:25,718 - INFO - Delete animalsRecordsCollectionTwo/69d66e0a09f3b1a15490a6b9 finished with status 204
+2026-04-08 18:05:25,829 - INFO - Delete animalsRecordsCollectionTwo/69d66e0a09f3b1a15490a6bb finished with status 204
+2026-04-08 18:05:25,829 - INFO - === PURGE myPetAnimalCardReestr ===
+2026-04-08 18:05:25,884 - INFO - [myPetAnimalCardReestr] found=2
+2026-04-08 18:05:26,009 - INFO - Delete myPetAnimalCardReestr/69d66e0b8cfb8c55ceefe55f finished with status 204
+2026-04-08 18:05:26,116 - INFO - Delete myPetAnimalCardReestr/69d66e0c8cfb8c55ceefe561 finished with status 204
+2026-04-08 18:05:26,116 - INFO - === PURGE animalCatchActRegistryCollection ===
+2026-04-08 18:05:26,181 - INFO - [animalCatchActRegistryCollection] found=0
+2026-04-08 18:05:26,181 - INFO - === PURGE animalReleaseActRegistryEntry ===
+2026-04-08 18:05:26,253 - INFO - [animalReleaseActRegistryEntry] found=3
+2026-04-08 18:05:26,381 - INFO - Delete animalReleaseActRegistryEntry/69d66e258cfb8c55ceefe5bc finished with status 204
+2026-04-08 18:05:26,489 - INFO - Delete animalReleaseActRegistryEntry/69d66e2709f3b1a15490a71a finished with status 204
+2026-04-08 18:05:26,595 - INFO - Delete animalReleaseActRegistryEntry/69d66e2809f3b1a15490a71d finished with status 204
+2026-04-08 18:05:26,595 - INFO - === PURGE animalTransferActRegistryCollection ===
+2026-04-08 18:05:26,677 - INFO - [animalTransferActRegistryCollection] found=2
+2026-04-08 18:05:26,812 - INFO - Delete animalTransferActRegistryCollection/69d66e2409f3b1a15490a713 finished with status 204
+2026-04-08 18:05:26,965 - INFO - Delete animalTransferActRegistryCollection/69d66e248cfb8c55ceefe5b8 finished with status 204
+2026-04-08 18:05:26,965 - INFO - Clear done. deleted=11 failed=0

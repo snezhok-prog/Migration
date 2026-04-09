@@ -1,0 +1,39 @@
+2026-04-08 14:48:30,482 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_14-48-30.txt
+2026-04-08 14:48:30,482 - INFO - Starting clear collections
+2026-04-08 14:48:30,482 - INFO - Profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 14:48:30,482 - INFO - Collections=['animalCatchOrderRegistryCollection', 'animalsRecordsCollectionTwo', 'myPetAnimalCardReestr', 'animalCatchActRegistryCollection', 'animalReleaseActRegistryEntry', 'animalTransferActRegistryCollection']
+2026-04-08 14:48:30,488 - INFO - Dry run=True
+2026-04-08 14:48:30,489 - INFO - Parsed cookie pairs: 3
+2026-04-08 14:48:30,645 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 14:48:30,646 - INFO - [AUTH] token/cookie files updated
+2026-04-08 14:48:30,647 - INFO - === PURGE animalCatchOrderRegistryCollection ===
+2026-04-08 14:48:30,832 - INFO - [animalCatchOrderRegistryCollection] found=2
+2026-04-08 14:48:30,832 - INFO - [DRY][animalCatchOrderRegistryCollection] delete _id=69d63f6809f3b1a15490982b guid=b3ef4c86-3f84-4284-9391-6ec9323f5fbc
+2026-04-08 14:48:30,832 - INFO - [DRY][animalCatchOrderRegistryCollection] delete _id=69d63f938cfb8c55ceefd6bf guid=897d0616-2add-4984-84d0-8e56fa906702
+2026-04-08 14:48:30,832 - INFO - === PURGE animalsRecordsCollectionTwo ===
+2026-04-08 14:48:30,948 - INFO - [animalsRecordsCollectionTwo] found=2
+2026-04-08 14:48:30,948 - INFO - [DRY][animalsRecordsCollectionTwo] delete _id=69d63f6a8cfb8c55ceefd665 guid=621df66c-b970-4b2a-b690-6f0d86d6d0de
+2026-04-08 14:48:30,948 - INFO - [DRY][animalsRecordsCollectionTwo] delete _id=69d63f9409f3b1a154909896 guid=1d77d910-3989-40f9-9ca6-520e612f8e3a
+2026-04-08 14:48:30,949 - INFO - === PURGE myPetAnimalCardReestr ===
+2026-04-08 14:48:31,018 - INFO - [myPetAnimalCardReestr] found=2
+2026-04-08 14:48:31,018 - INFO - [DRY][myPetAnimalCardReestr] delete _id=69d63f6d09f3b1a15490983b guid=0428f2cb-ec2c-4c39-a2ae-6138524311f7
+2026-04-08 14:48:31,018 - INFO - [DRY][myPetAnimalCardReestr] delete _id=69d63f978cfb8c55ceefd6c5 guid=4bc077b1-1526-4940-b8dd-d6f559ff7aad
+2026-04-08 14:48:31,018 - INFO - === PURGE animalCatchActRegistryCollection ===
+2026-04-08 14:48:31,075 - INFO - [animalCatchActRegistryCollection] found=2
+2026-04-08 14:48:31,075 - INFO - [DRY][animalCatchActRegistryCollection] delete _id=69d63f6c09f3b1a154909836 guid=32a60bbe-ba51-408b-bad3-f8e73809205a
+2026-04-08 14:48:31,075 - INFO - [DRY][animalCatchActRegistryCollection] delete _id=69d63f9609f3b1a15490989e guid=63d2eaa2-b6aa-4ea2-a5e8-03a2b41e0e8a
+2026-04-08 14:48:31,075 - INFO - === PURGE animalReleaseActRegistryEntry ===
+2026-04-08 14:48:31,150 - INFO - [animalReleaseActRegistryEntry] found=6
+2026-04-08 14:48:31,150 - INFO - [DRY][animalReleaseActRegistryEntry] delete _id=69d63f8a09f3b1a154909884 guid=1ba51cb7-9e4d-488f-8588-9bf7e6e6e961
+2026-04-08 14:48:31,150 - INFO - [DRY][animalReleaseActRegistryEntry] delete _id=69d63f908cfb8c55ceefd6b9 guid=09e28f58-b6e1-4efa-828f-d4bf0622b27c
+2026-04-08 14:48:31,150 - INFO - [DRY][animalReleaseActRegistryEntry] delete _id=69d63f918cfb8c55ceefd6bc guid=aa0b1910-e511-4d93-9833-1db7e514fab4
+2026-04-08 14:48:31,150 - INFO - [DRY][animalReleaseActRegistryEntry] delete _id=69d63fb08cfb8c55ceefd71f guid=208e30e9-60ea-458b-abf7-f8558e8d230d
+2026-04-08 14:48:31,150 - INFO - [DRY][animalReleaseActRegistryEntry] delete _id=69d63fb28cfb8c55ceefd726 guid=76973005-563c-493e-b0a4-eaa43c5988aa
+2026-04-08 14:48:31,150 - INFO - [DRY][animalReleaseActRegistryEntry] delete _id=69d63fb38cfb8c55ceefd72b guid=a203a3f7-1023-4c28-bf1a-458f71b1d644
+2026-04-08 14:48:31,150 - INFO - === PURGE animalTransferActRegistryCollection ===
+2026-04-08 14:48:31,216 - INFO - [animalTransferActRegistryCollection] found=4
+2026-04-08 14:48:31,216 - INFO - [DRY][animalTransferActRegistryCollection] delete _id=69d63f888cfb8c55ceefd6b0 guid=129f3ba8-6ebb-4a3e-8ac7-4d196c1fcb69
+2026-04-08 14:48:31,216 - INFO - [DRY][animalTransferActRegistryCollection] delete _id=69d63f898cfb8c55ceefd6b4 guid=65908a97-7e78-4c3d-ad7d-9d92418b7619
+2026-04-08 14:48:31,216 - INFO - [DRY][animalTransferActRegistryCollection] delete _id=69d63faf8cfb8c55ceefd717 guid=43150d5c-cf88-4be8-8f13-1393b051fb67
+2026-04-08 14:48:31,216 - INFO - [DRY][animalTransferActRegistryCollection] delete _id=69d63faf09f3b1a1549098dc guid=fb068438-7d41-4eb9-a942-63f0539be0ad
+2026-04-08 14:48:31,216 - INFO - Clear done. deleted=0 failed=0

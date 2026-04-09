@@ -1,0 +1,1 @@
+{"registry": "catch-order", "index": 1, "orderNumber": 999002, "error": "VALIDATION: animals[0].kind is empty"}

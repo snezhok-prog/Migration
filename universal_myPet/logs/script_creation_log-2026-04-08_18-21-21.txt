@@ -1,0 +1,4 @@
+2026-04-08 18:21:21,803 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_18-21-21.txt
+2026-04-08 18:21:21,805 - INFO - Parsed cookie pairs: 3
+2026-04-08 18:21:21,993 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 18:21:21,994 - INFO - [AUTH] token/cookie files updated

@@ -1,0 +1,35 @@
+2026-04-08 15:02:13,917 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-02-13.txt
+2026-04-08 15:02:13,918 - INFO - Mode: mode=single dry_run=False auth_only=False skip_auth=False operator_mode=True limit=1 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 15:02:13,920 - INFO - Selected workbooks: -
+2026-04-08 15:02:13,921 - INFO - State reset completed for namespace
+2026-04-08 15:02:13,921 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 15:02:13,927 - INFO - Parsed cookie pairs: 3
+2026-04-08 15:02:14,092 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 15:02:14,093 - INFO - [AUTH] token/cookie files updated
+2026-04-08 15:02:14,094 - INFO - [INPUT] catch files: ['catch_orders_registry_part1.json']
+2026-04-08 15:02:14,094 - INFO - [INPUT] stray files: -
+2026-04-08 15:02:14,094 - INFO - [INPUT] card files: -
+2026-04-08 15:02:14,095 - INFO - [CATCH] file=catch_orders_registry_part1.json rows=1
+2026-04-08 15:02:14,095 - INFO - [CATCH] total rows=1
+2026-04-08 15:02:14,096 - INFO - [CATCH-ORDER] start rows=1
+2026-04-08 15:02:14,096 - ERROR - [CATCH-ORDER] row error: 1
+Traceback (most recent call last):
+  File "C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\migration.py", line 1485, in process_order_rows
+    validate_order_row_before_create(row)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\migration.py", line 1384, in validate_order_row_before_create
+    raise ValueError(f"VALIDATION: animals[{idx}].kind is empty")
+ValueError: VALIDATION: animals[0].kind is empty
+2026-04-08 15:02:14,097 - INFO - ===== DONE =====
+2026-04-08 15:02:14,097 - INFO - Created: []
+2026-04-08 15:02:14,097 - INFO - Errors: [
+  {
+    "registry": "catch-order",
+    "index": 1,
+    "orderNumber": 999002,
+    "error": "VALIDATION: animals[0].kind is empty"
+  }
+]
+2026-04-08 15:02:14,097 - INFO - ===== ROLLBACK BODY (final-summary) =====
+[]
+===== /ROLLBACK BODY =====

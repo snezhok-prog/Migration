@@ -1,0 +1,19 @@
+2026-04-08 19:19:41,790 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_19-19-41.txt
+2026-04-08 19:19:41,792 - INFO - Mode: mode=single dry_run=False auth_only=False skip_auth=False operator_mode=True limit=1 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 19:19:41,793 - INFO - Selected workbooks: ['C:\\Услуги\\ветеренария\\Миграция возвращение\\Форма_для_миграции_Мой_питомец_136_1.xlsm']
+2026-04-08 19:19:41,793 - INFO - Workbook files mapping: Форма_для_миграции_Мой_питомец_136_1.xlsm -> C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one
+2026-04-08 19:19:41,808 - INFO - State reset completed for namespace
+2026-04-08 19:19:41,808 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 19:19:41,811 - INFO - Parsed cookie pairs: 3
+2026-04-08 19:19:41,996 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 19:19:41,998 - INFO - [AUTH] token/cookie files updated
+2026-04-08 19:19:41,998 - INFO - Processing workbook: C:\Услуги\ветеренария\Миграция возвращение\Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 19:19:44,142 - INFO - [EXCEL] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm
+2026-04-08 19:19:44,142 - INFO - [EXCEL] sheets: catch='2. Реестр заказ-нарядов на отло', stray='3. Реестр животных без владельц', card='4. Реестр карточек учета животн'
+2026-04-08 19:19:44,238 - INFO - [EXCEL] parsed rows: catch=2 stray=2 card=2
+2026-04-08 19:19:44,238 - INFO - [INPUT] workbook=Форма_для_миграции_Мой_питомец_136_1.xlsm rows summary: catch=1 stray=1 card=1
+2026-04-08 19:19:44,239 - INFO - [CATCH-ORDER] start rows=1
+2026-04-08 19:19:44,383 - INFO - [ORG-LOOKUP][authorizedOrg] found (ogrn). id=6650527c3000227496944b6b
+2026-04-08 19:19:44,520 - WARNING - [ORG-LOOKUP][catchOrg] not found (ogrn). name='Общество с ограниченной ответственностью "Отлов"', ogrn='2223334445555'
+2026-04-08 19:19:44,791 - INFO - [UPLOAD][file] collection=animalCatchOrderRegistryCollection id=69d680208cfb8c55ceeff8c8 path=animal[0].photo[0] file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\files\one\Тест безнадзорная собака.png
+2026-04-08 19:19:45,093 - ERROR - [CATCH-ORDER] row error: 6 | {"message": "Upload file failed: HTTP 413", "code": 413, "data": "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"}

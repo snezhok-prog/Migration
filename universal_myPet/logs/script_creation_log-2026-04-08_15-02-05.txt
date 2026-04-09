@@ -1,0 +1,36 @@
+2026-04-08 15:02:05,805 - INFO - Запуск скрипта. Лог: C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-02-05.txt
+2026-04-08 15:02:05,806 - INFO - Mode: mode=single dry_run=False auth_only=False skip_auth=False operator_mode=True limit=1 profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 15:02:05,807 - INFO - Selected workbooks: -
+2026-04-08 15:02:05,814 - INFO - Resume: enabled=True state_file=C:\Услуги\ветеренария\Миграция возвращение\universal_myPet\state\checkpoints.json namespace=dev|https://iam.torknd-customer.dev.pd15.digitalgov.mtp|universal-my-pet
+2026-04-08 15:02:05,815 - INFO - Parsed cookie pairs: 3
+2026-04-08 15:02:05,972 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 15:02:05,973 - INFO - [AUTH] token/cookie files updated
+2026-04-08 15:02:05,974 - INFO - [INPUT] catch files: ['catch_orders_registry_part1.json']
+2026-04-08 15:02:05,974 - INFO - [INPUT] stray files: -
+2026-04-08 15:02:05,974 - INFO - [INPUT] card files: -
+2026-04-08 15:02:05,975 - INFO - [CATCH] file=catch_orders_registry_part1.json rows=1
+2026-04-08 15:02:05,975 - INFO - [CATCH] total rows=1
+2026-04-08 15:02:06,268 - INFO - [VERIFY] checked=1 missing_or_error=0
+2026-04-08 15:02:06,268 - INFO - ===== DONE =====
+2026-04-08 15:02:06,268 - INFO - Created: [
+  {
+    "workbook": "json",
+    "job": "catch_orders",
+    "index": 1,
+    "_id": "69d643888cfb8c55ceefd841",
+    "guid": "c72e21bd-8cb2-4b85-848b-d9c4473cd631",
+    "parentEntries": "animalCatchOrderRegistryCollection",
+    "registry": "catch-order",
+    "resumed": true
+  }
+]
+2026-04-08 15:02:06,268 - INFO - Errors: []
+2026-04-08 15:02:06,269 - INFO - ===== ROLLBACK BODY (final-summary) =====
+[
+  {
+    "_id": "69d643888cfb8c55ceefd841",
+    "guid": "c72e21bd-8cb2-4b85-848b-d9c4473cd631",
+    "parentEntries": "animalCatchOrderRegistryCollection"
+  }
+]
+===== /ROLLBACK BODY =====

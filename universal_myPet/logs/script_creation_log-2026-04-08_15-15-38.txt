@@ -1,0 +1,21 @@
+2026-04-08 15:15:38,032 - INFO - Запуск скрипта. Лог: c:\Услуги\ветеренария\Миграция возвращение\universal_myPet\logs\script_creation_log-2026-04-08_15-15-38.txt
+2026-04-08 15:15:38,032 - INFO - Starting clear collections
+2026-04-08 15:15:38,033 - INFO - Profile=dev base_url=https://iam.torknd-customer.dev.pd15.digitalgov.mtp
+2026-04-08 15:15:38,033 - INFO - Collections=['animalCatchOrderRegistryCollection', 'animalsRecordsCollectionTwo', 'myPetAnimalCardReestr', 'animalCatchActRegistryCollection', 'animalReleaseActRegistryEntry', 'animalTransferActRegistryCollection']
+2026-04-08 15:15:38,033 - INFO - Dry run=False
+2026-04-08 15:15:43,352 - INFO - Parsed cookie pairs: 3
+2026-04-08 15:15:43,527 - INFO - [AUTH TEST] https://iam.torknd-customer.dev.pd15.digitalgov.mtp/api/v1/search/organizations -> 200
+2026-04-08 15:15:43,528 - INFO - [AUTH] token/cookie files updated
+2026-04-08 15:15:43,528 - INFO - === PURGE animalCatchOrderRegistryCollection ===
+2026-04-08 15:15:43,733 - INFO - [animalCatchOrderRegistryCollection] found=0
+2026-04-08 15:15:43,734 - INFO - === PURGE animalsRecordsCollectionTwo ===
+2026-04-08 15:15:43,785 - INFO - [animalsRecordsCollectionTwo] found=0
+2026-04-08 15:15:43,785 - INFO - === PURGE myPetAnimalCardReestr ===
+2026-04-08 15:15:43,891 - INFO - [myPetAnimalCardReestr] found=0
+2026-04-08 15:15:43,891 - INFO - === PURGE animalCatchActRegistryCollection ===
+2026-04-08 15:15:43,949 - INFO - [animalCatchActRegistryCollection] found=0
+2026-04-08 15:15:43,949 - INFO - === PURGE animalReleaseActRegistryEntry ===
+2026-04-08 15:15:43,999 - INFO - [animalReleaseActRegistryEntry] found=0
+2026-04-08 15:15:44,000 - INFO - === PURGE animalTransferActRegistryCollection ===
+2026-04-08 15:15:44,063 - INFO - [animalTransferActRegistryCollection] found=0
+2026-04-08 15:15:44,063 - INFO - Clear done. deleted=0 failed=0
