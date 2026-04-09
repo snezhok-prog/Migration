@@ -81,8 +81,11 @@ from _utils import (
 
 
 PART_RE = re.compile(r"_part(\d+)\.json$", re.IGNORECASE)
+FILE_NAME_SPLIT_RE = re.compile(r"[\\/\\\uf05c\\\u2215\\\u2044]+")
+MULTISPACE_RE = re.compile(r"\s+")
 ACTIVE_FILES_DIR = FILES_DIR
 RUNTIME_OPERATOR_MODE = False
+FILE_INDEX_CACHE: Dict[str, Dict[str, str]] = {}
 
 
 @dataclass
@@ -92,11 +95,62 @@ class WorkbookRunSpec:
 
 
 def set_active_files_dir(path: str):
-    global ACTIVE_FILES_DIR
+    global ACTIVE_FILES_DIR, FILE_INDEX_CACHE
     if path:
         ACTIVE_FILES_DIR = os.path.abspath(path)
     else:
         ACTIVE_FILES_DIR = os.path.abspath(FILES_DIR)
+    FILE_INDEX_CACHE = {}
+
+
+def _canonical_filename_token(value: Any) -> str:
+    raw = as_string_or_null(value)
+    if not raw:
+        return ""
+    text = str(raw).replace("\ufeff", "").replace("\u00A0", " ").strip().strip('"').strip("'").strip()
+    if not text:
+        return ""
+    parts = [p for p in FILE_NAME_SPLIT_RE.split(text) if p]
+    tail = parts[-1] if parts else text
+    return MULTISPACE_RE.sub(" ", tail).strip().casefold()
+
+
+def _index_files_by_canonical_name(root_dir: str) -> Dict[str, str]:
+    abs_root = os.path.abspath(root_dir)
+    cached = FILE_INDEX_CACHE.get(abs_root)
+    if cached is not None:
+        return cached
+
+    index: Dict[str, str] = {}
+    if os.path.isdir(abs_root):
+        for root, _, files in os.walk(abs_root):
+            for name in files:
+                key = _canonical_filename_token(name)
+                if key and key not in index:
+                    index[key] = os.path.abspath(os.path.join(root, name))
+    FILE_INDEX_CACHE[abs_root] = index
+    return index
+
+
+def _find_embedded_path_file_in_script_root(filename: str) -> Optional[str]:
+    target_key = _canonical_filename_token(filename)
+    if not target_key:
+        return None
+    script_root = os.path.abspath(SCRIPT_DIR)
+    try:
+        entries = os.listdir(script_root)
+    except Exception:
+        return None
+    for entry in entries:
+        p = os.path.join(script_root, entry)
+        if not os.path.isfile(p):
+            continue
+        # Linux unzip issue: files may be extracted into root with "files\\one\\name.ext" as file name.
+        if "\\" not in entry and "\uf05c" not in entry and "\u2215" not in entry and "\u2044" not in entry:
+            continue
+        if _canonical_filename_token(entry) == target_key:
+            return os.path.abspath(p)
+    return None
 
 
 def _parse_path_list(raw: str) -> List[str]:
@@ -471,6 +525,7 @@ def resolve_local_file_path(filename):
     fn = as_string_or_null(filename)
     if not fn:
         return None
+    target_key = _canonical_filename_token(fn)
 
     # 1) absolute path from json
     if _is_abs_path(fn) and os.path.isfile(fn):
@@ -491,18 +546,23 @@ def resolve_local_file_path(filename):
     if os.path.isfile(default_root):
         return default_root
 
-    # 5) recursive by basename under active files dir
-    base = os.path.basename(fn).lower()
-    for root, _, files in os.walk(ACTIVE_FILES_DIR):
-        for cand in files:
-            if cand.lower() == base:
-                return os.path.abspath(os.path.join(root, cand))
-    # 6) recursive by basename under default files root
-    if os.path.abspath(ACTIVE_FILES_DIR) != os.path.abspath(FILES_DIR):
-        for root, _, files in os.walk(FILES_DIR):
-            for cand in files:
-                if cand.lower() == base:
-                    return os.path.abspath(os.path.join(root, cand))
+    # 5) indexed recursive lookup under active files dir (canonical file name)
+    if target_key:
+        active_hit = _index_files_by_canonical_name(ACTIVE_FILES_DIR).get(target_key)
+        if active_hit and os.path.isfile(active_hit):
+            return active_hit
+
+    # 6) indexed recursive lookup under default files root (canonical file name)
+    if target_key and os.path.abspath(ACTIVE_FILES_DIR) != os.path.abspath(FILES_DIR):
+        default_hit = _index_files_by_canonical_name(FILES_DIR).get(target_key)
+        if default_hit and os.path.isfile(default_hit):
+            return default_hit
+
+    # 7) fallback for malformed root file names like "files\\one\\name.ext" (zip extraction issue on Linux)
+    embedded_hit = _find_embedded_path_file_in_script_root(fn)
+    if embedded_hit and os.path.isfile(embedded_hit):
+        return embedded_hit
+
     return None
 
 
