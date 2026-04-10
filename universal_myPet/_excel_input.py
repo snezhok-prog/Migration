@@ -620,4 +620,13 @@ def load_rows_from_excel(excel_path, logger):
     card_rows = _parse_card_rows(card_ws)
 
     logger.info("[EXCEL] parsed rows: catch=%s stray=%s card=%s", len(catch_rows), len(stray_rows), len(card_rows))
-    return {"catch": catch_rows, "stray": stray_rows, "card": card_rows}
+    return {
+        "catch": catch_rows,
+        "stray": stray_rows,
+        "card": card_rows,
+        "sheets": {
+            "catch": catch_ws.title,
+            "stray": stray_ws.title,
+            "card": card_ws.title,
+        },
+    }

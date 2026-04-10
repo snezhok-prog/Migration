@@ -61,7 +61,7 @@ from _config import (
     VERIFY_CREATED,
 )
 from _excel_input import discover_excel_files, load_rows_from_excel
-from _logger import setup_fail_logger, setup_logger, setup_success_logger
+from _logger import setup_fail_logger, setup_logger, setup_success_logger, setup_user_logger
 from _profiles import PROFILES
 from _state import ResumeState
 from _utils import (
@@ -92,6 +92,193 @@ FILE_INDEX_CACHE: Dict[str, Dict[str, str]] = {}
 class WorkbookRunSpec:
     workbook_path: str
     files_dir: str
+
+
+JOB_DISPLAY_NAMES = {
+    "catch_orders": "Заказ-наряды на отлов",
+    "stray_animals": "Животные без владельцев",
+    "animal_cards": "Карточки учета животных",
+}
+JOB_FALLBACK_SHEET_LABELS = {
+    "catch_orders": "Лист 2 (реестр заказ-нарядов)",
+    "stray_animals": "Лист 3 (реестр животных без владельцев)",
+    "animal_cards": "Лист 4 (реестр карточек учета животных)",
+}
+REGISTRY_DISPLAY_NAMES = {
+    "catch-order": "Реестр заказ-нарядов",
+    "stray": "Реестр животных без владельцев",
+    "catch-act-from-stray": "Реестр актов отлова",
+    "card": "Реестр карточек учета",
+    "handover-with-catcher": "Реестр актов передачи (с ловцом)",
+    "handover-with-shelter": "Реестр актов передачи (с приютом)",
+    "release-act": "Реестр актов выпуска",
+    "death-act": "Реестр актов о смерти",
+    "transfer-owner-act": "Реестр актов передачи владельцу",
+}
+
+
+def _job_display_name(job_name: str) -> str:
+    return JOB_DISPLAY_NAMES.get(str(job_name or ""), str(job_name or "неизвестный раздел"))
+
+
+def _fallback_sheet_label(job_name: str) -> str:
+    return JOB_FALLBACK_SHEET_LABELS.get(str(job_name or ""), "Лист не определен")
+
+
+def _registry_display_name(registry_name: str) -> str:
+    return REGISTRY_DISPLAY_NAMES.get(str(registry_name or ""), str(registry_name or "-"))
+
+
+def _error_row_index(error_item: Dict[str, Any]) -> Optional[int]:
+    try:
+        return int(error_item.get("index"))
+    except Exception:
+        return None
+
+
+def _extract_failed_uploads(error_obj: Any) -> List[Dict[str, str]]:
+    if not isinstance(error_obj, dict):
+        return []
+    data = error_obj.get("data")
+    if not isinstance(data, dict):
+        return []
+    failed = data.get("failedUploads")
+    if not isinstance(failed, list):
+        return []
+
+    out: List[Dict[str, str]] = []
+    for item in failed:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "path": as_string_or_null(item.get("path")) or "-",
+                "filename": as_string_or_null(item.get("filename")) or "-",
+                "reason": _format_operator_error(item.get("error")),
+            }
+        )
+    return out
+
+
+def _row_has_primary_success(items: List[Dict[str, Any]], start_idx: int, row_num: int, primary_registry: str) -> bool:
+    for item in items[start_idx:]:
+        if str(item.get("registry") or "") != str(primary_registry or ""):
+            continue
+        try:
+            if int(item.get("index")) == int(row_num):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _log_user_run_header(
+    *,
+    user_logger,
+    profile: str,
+    base_url: str,
+    mode: str,
+    interactive: bool,
+    operator_mode: bool,
+    state_file_path: str,
+    success_log_path: str,
+    fail_log_path: str,
+):
+    if user_logger is None:
+        return
+    lines = [
+        "===== СТАРТ МИГРАЦИИ =====",
+        f"Профиль: {profile}",
+        f"Стенд: {base_url}",
+        f"Режим: {mode}",
+        f"Интерактивный режим: {'да' if interactive else 'нет'}",
+        f"Operator mode: {'включен' if operator_mode else 'выключен'}",
+        f"Файл checkpoints: {state_file_path}",
+        f"Лог успехов: {success_log_path or '-'}",
+        f"Лог ошибок: {fail_log_path or '-'}",
+    ]
+    user_logger.info("\n".join(lines))
+
+
+def _log_user_row_error(
+    *,
+    user_logger,
+    workbook_label: str,
+    sheet_label: str,
+    job_name: str,
+    primary_registry: str,
+    error_item: Dict[str, Any],
+    action_label: str,
+    row_migrated: bool,
+    stopped: bool,
+    state_file_path: str,
+):
+    if user_logger is None or not isinstance(error_item, dict):
+        return
+
+    registry_name = as_string_or_null(error_item.get("registry")) or primary_registry
+    stage = as_string_or_null(error_item.get("stage")) or "create"
+    row_num = _error_row_index(error_item)
+    error_obj = error_item.get("error")
+    error_text = _format_operator_error(error_obj)
+    failed_uploads = _extract_failed_uploads(error_obj)
+
+    lines = [
+        "----- ОШИБКА СТРОКИ -----",
+        f"Таблица: {workbook_label}",
+        f"Лист: {sheet_label or _fallback_sheet_label(job_name)}",
+        f"Раздел: {_job_display_name(job_name)} ({job_name})",
+        f"Реестр: {_registry_display_name(registry_name)} ({registry_name})",
+        f"Строка Excel: {row_num if row_num is not None else '-'}",
+        f"Этап: {stage}",
+        f"Ошибка: {error_text}",
+    ]
+    if failed_uploads:
+        lines.append("Детали по полям/файлам:")
+        for item in failed_uploads:
+            lines.append(
+                "  поле=%s | файл=%s | причина=%s"
+                % (item.get("path") or "-", item.get("filename") or "-", item.get("reason") or "-")
+            )
+
+    lines.extend(
+        [
+            f"Действие после ошибки: {action_label}",
+            f"Строка мигрирована: {'ДА' if row_migrated else 'НЕТ'}",
+        ]
+    )
+
+    if stopped:
+        lines.extend(
+            [
+                "Статус: миграция остановлена.",
+                f"Как продолжить: повторите запуск этим же скриптом (resume использует {state_file_path}).",
+                "Как откатить: python rollback.py (или rollback_orders.py / rollback_stray.py / rollback_cards.py).",
+            ]
+        )
+    else:
+        lines.append("Статус: миграция продолжена.")
+
+    user_logger.info("\n".join(lines))
+
+
+def _log_user_run_summary(*, user_logger, created_items: List[Dict[str, Any]], errors: List[Dict[str, Any]], stopped: bool):
+    if user_logger is None:
+        return
+    created_total = len(created_items)
+    error_total = len(errors)
+    resumed_total = 0
+    for item in created_items:
+        if isinstance(item, dict) and item.get("resumed"):
+            resumed_total += 1
+    lines = [
+        "===== ФИНИШ МИГРАЦИИ =====",
+        f"Создано/подтверждено записей: {created_total}",
+        f"Ошибок строк: {error_total}",
+        f"Resume-строк (пропущено как уже обработанные): {resumed_total}",
+        f"Итоговый статус: {'ОСТАНОВЛЕНО' if stopped else 'ЗАВЕРШЕНО'}",
+    ]
+    user_logger.info("\n".join(lines))
 
 
 def set_active_files_dir(path: str):
@@ -3528,11 +3715,14 @@ def _process_job_with_resume(
     state: ResumeState,
     workbook_key: str,
     workbook_label: str,
+    sheet_label: str,
     job_name: str,
     primary_registry: str,
     primary_collection: str,
     dry_run: bool,
     interactive: bool,
+    user_logger,
+    state_file_path: str,
 ) -> bool:
     pending = []
     resumed_count = 0
@@ -3658,7 +3848,9 @@ def _process_job_with_resume(
         while True:
             try:
                 raw = input(
-                    "[ОПЕРАТОР] %s/%s строка=%s: ошибка обработки\nДетали: %s\nДействия: [П]овторить / [Пр]опустить / [О]становить (с сохранением прогресса): "
+                    "[ОПЕРАТОР] %s/%s строка=%s: ошибка обработки\n"
+                    "Детали: %s\n"
+                    "Действия: [П]овторить / [Пр]опустить (строка не будет мигрирована) / [О]становить (с сохранением прогресса): "
                     % (workbook_label, job_name, row_num, err_msg)
                 )
             except EOFError:
@@ -3676,7 +3868,10 @@ def _process_job_with_resume(
         while True:
             try:
                 raw = input(
-                    "[ОПЕРАТОР] %s/%s строка=%s: нефатальная ошибка\nДетали: %s\nДействия: [Д]альше / [О]становить (с сохранением прогресса): "
+                    "[ОПЕРАТОР] %s/%s строка=%s: нефатальная ошибка\n"
+                    "Внимание: основная запись строки уже создана частично.\n"
+                    "Детали: %s\n"
+                    "Действия: [Д]альше / [О]становить (с сохранением прогресса): "
                     % (workbook_label, job_name, row_num, err_msg)
                 )
             except EOFError:
@@ -3690,11 +3885,23 @@ def _process_job_with_resume(
     def _log_operator_stop(row_num: int):
         logger.warning(
             "[ОПЕРАТОР] Остановка по решению оператора: %s/%s строка=%s. "
-            "Прогресс сохранен в checkpoints, запуск можно продолжить повторным стартом скрипта.",
+            "Прогресс сохранен в checkpoints (%s), запуск можно продолжить повторным стартом скрипта.",
             workbook_label,
             job_name,
             row_num,
+            state_file_path,
         )
+
+    def _row_errors_since(start_error_idx: int, row_num: int) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for err in errors[start_error_idx:]:
+            if not isinstance(err, dict):
+                continue
+            idx = _error_row_index(err)
+            if idx is not None and idx != row_num:
+                continue
+            out.append(err)
+        return out
 
     if RUNTIME_OPERATOR_MODE and interactive:
         for row in pending:
@@ -3713,10 +3920,31 @@ def _process_job_with_resume(
                     fail=errors,
                 )
                 _mark_new_successes(created_before, errors_before)
+                row_success = _row_has_primary_success(created_items, created_before, row_num, primary_registry)
+                row_errors = _row_errors_since(errors_before, row_num)
                 if stopped:
-                    if len(errors) > errors_before:
-                        last_err = errors[-1]
+                    if row_errors:
+                        last_err = row_errors[-1]
                         action = _operator_row_action(row_num, last_err.get("error"))
+                        if action == "retry":
+                            action_label = "Повтор строки по решению оператора"
+                        elif action == "skip":
+                            action_label = "Пропуск строки по решению оператора"
+                        else:
+                            action_label = "Остановка по решению оператора"
+                        for err_item in row_errors:
+                            _log_user_row_error(
+                                user_logger=user_logger,
+                                workbook_label=workbook_label,
+                                sheet_label=sheet_label,
+                                job_name=job_name,
+                                primary_registry=primary_registry,
+                                error_item=err_item,
+                                action_label=action_label,
+                                row_migrated=row_success,
+                                stopped=(action == "abort"),
+                                state_file_path=state_file_path,
+                            )
                         if action == "retry":
                             del errors[errors_before:]
                             continue
@@ -3725,26 +3953,52 @@ def _process_job_with_resume(
                         _log_operator_stop(row_num)
                         return True
 
-                row_success = False
-                for item in created_items[created_before:]:
-                    if str(item.get("registry") or "") != primary_registry:
-                        continue
-                    try:
-                        if int(item.get("index")) == row_num:
-                            row_success = True
-                            break
-                    except Exception:
-                        continue
-
-                if len(errors) > errors_before:
-                    last_err = errors[-1]
+                if row_errors:
+                    last_err = row_errors[-1]
                     if row_success:
                         action = _operator_row_post_error_action(row_num, last_err.get("error"))
+                        action_label = (
+                            "Продолжение после нефатальной ошибки"
+                            if action == "continue"
+                            else "Остановка по решению оператора"
+                        )
+                        for err_item in row_errors:
+                            _log_user_row_error(
+                                user_logger=user_logger,
+                                workbook_label=workbook_label,
+                                sheet_label=sheet_label,
+                                job_name=job_name,
+                                primary_registry=primary_registry,
+                                error_item=err_item,
+                                action_label=action_label,
+                                row_migrated=True,
+                                stopped=(action == "abort"),
+                                state_file_path=state_file_path,
+                            )
                         if action == "abort":
                             _log_operator_stop(row_num)
                             return True
                         break
                     action = _operator_row_action(row_num, last_err.get("error"))
+                    if action == "retry":
+                        action_label = "Повтор строки по решению оператора"
+                    elif action == "skip":
+                        action_label = "Пропуск строки по решению оператора"
+                    else:
+                        action_label = "Остановка по решению оператора"
+                    for err_item in row_errors:
+                        _log_user_row_error(
+                            user_logger=user_logger,
+                            workbook_label=workbook_label,
+                            sheet_label=sheet_label,
+                            job_name=job_name,
+                            primary_registry=primary_registry,
+                            error_item=err_item,
+                            action_label=action_label,
+                            row_migrated=False,
+                            stopped=(action == "abort"),
+                            state_file_path=state_file_path,
+                        )
                     if action == "retry":
                         del errors[errors_before:]
                         continue
@@ -3770,6 +4024,34 @@ def _process_job_with_resume(
         fail=errors,
     )
     _mark_new_successes(before_len, errors_before)
+    new_errors = [e for e in errors[errors_before:] if isinstance(e, dict)]
+    if new_errors:
+        for idx, err_item in enumerate(new_errors):
+            row_idx = _error_row_index(err_item)
+            row_migrated = False
+            if row_idx is not None:
+                row_migrated = _row_has_primary_success(created_items, before_len, row_idx, primary_registry)
+
+            is_stop_error = bool(stopped and idx == len(new_errors) - 1)
+            if is_stop_error:
+                action_label = "Автоматическая остановка по конфигурации ошибок"
+            elif stopped:
+                action_label = "Ошибка зафиксирована; обработка продолжалась до остановки"
+            else:
+                action_label = "Строка пропущена автоматически, миграция продолжена"
+
+            _log_user_row_error(
+                user_logger=user_logger,
+                workbook_label=workbook_label,
+                sheet_label=sheet_label,
+                job_name=job_name,
+                primary_registry=primary_registry,
+                error_item=err_item,
+                action_label=action_label,
+                row_migrated=row_migrated,
+                stopped=is_stop_error,
+                state_file_path=state_file_path,
+            )
     return stopped
 
 
@@ -3786,6 +4068,7 @@ def main():
     logger = setup_logger()
     success_logger = setup_success_logger()
     fail_logger = setup_fail_logger()
+    user_logger = setup_user_logger()
 
     effective_profile = _setup_runtime_profile(args)
     logger.info(
@@ -3802,9 +4085,13 @@ def main():
 
     if args.skip_auth and not args.dry_run:
         logger.error("--skip-auth can be used only with --dry-run")
+        if user_logger:
+            user_logger.info("Завершение с ошибкой: флаг --skip-auth допустим только вместе с --dry-run.")
         return 1
     if args.auth_only and args.skip_auth:
         logger.error("--auth-only cannot be used together with --skip-auth")
+        if user_logger:
+            user_logger.info("Завершение с ошибкой: флаги --auth-only и --skip-auth несовместимы.")
         return 1
 
     # `--no-prompt` affects only auth (cookie/token) input.
@@ -3830,6 +4117,18 @@ def main():
         state.reset_namespace()
         logger.info("State reset completed for namespace")
     logger.info("Resume: enabled=%s state_file=%s namespace=%s", state_enabled, state_path, resume_namespace)
+    logger.info("User log: %s", getattr(user_logger, "log_path", ""))
+    _log_user_run_header(
+        user_logger=user_logger,
+        profile=effective_profile,
+        base_url=get_runtime_base_url(),
+        mode=args.mode,
+        interactive=interactive,
+        operator_mode=RUNTIME_OPERATOR_MODE,
+        state_file_path=state_path,
+        success_log_path=getattr(success_logger, "log_path", ""),
+        fail_log_path=getattr(fail_logger, "log_path", ""),
+    )
 
     session = None
     if not args.skip_auth and not args.dry_run:
@@ -3840,12 +4139,15 @@ def main():
         )
         if not session:
             logger.error("Authorization failed, exiting")
+            if user_logger:
+                user_logger.info("Завершение с ошибкой: авторизация не прошла.")
             return 1
     elif args.skip_auth:
         logger.info("Auth skipped (--skip-auth)")
 
     if args.auth_only:
         logger.info("Auth-only mode completed")
+        _log_user_run_summary(user_logger=user_logger, created_items=[], errors=[], stopped=False)
         return 0
 
     created_items = []
@@ -3878,6 +4180,7 @@ def main():
             card_rows = _apply_limit(_with_row_numbers(load_rows_from_files(card_files, logger, "CARD"), 1), args.limit) if card_files else []
             logger.info("[DRY] json rows: catch=%s stray=%s card=%s", len(catch_rows), len(stray_rows), len(card_rows))
         logger.info("Dry-run completed")
+        _log_user_run_summary(user_logger=user_logger, created_items=created_items, errors=errors, stopped=False)
         return 0
 
     if run_specs:
@@ -3890,6 +4193,10 @@ def main():
             catch_rows = _apply_limit(_with_row_numbers(parsed.get("catch") or [], EXCEL_DATA_START_ROW), args.limit)
             stray_rows = _apply_limit(_with_row_numbers(parsed.get("stray") or [], EXCEL_DATA_START_ROW), args.limit)
             card_rows = _apply_limit(_with_row_numbers(parsed.get("card") or [], EXCEL_DATA_START_ROW), args.limit)
+            parsed_sheets = parsed.get("sheets") if isinstance(parsed, dict) else {}
+            catch_sheet = as_string_or_null((parsed_sheets or {}).get("catch")) or _fallback_sheet_label("catch_orders")
+            stray_sheet = as_string_or_null((parsed_sheets or {}).get("stray")) or _fallback_sheet_label("stray_animals")
+            card_sheet = as_string_or_null((parsed_sheets or {}).get("card")) or _fallback_sheet_label("animal_cards")
             logger.info(
                 "[INPUT] workbook=%s rows summary: catch=%s stray=%s card=%s",
                 os.path.basename(spec.workbook_path),
@@ -3900,6 +4207,15 @@ def main():
 
             workbook_key = os.path.abspath(spec.workbook_path)
             workbook_label = os.path.basename(spec.workbook_path)
+            if user_logger:
+                user_logger.info(
+                    "=== Обработка таблицы: %s | файлы: %s | листы: catch='%s', stray='%s', card='%s' ===",
+                    workbook_label,
+                    spec.files_dir,
+                    catch_sheet,
+                    stray_sheet,
+                    card_sheet,
+                )
 
             if catch_rows and not stopped:
                 stopped = _process_job_with_resume(
@@ -3915,11 +4231,14 @@ def main():
                     state=state,
                     workbook_key=workbook_key,
                     workbook_label=workbook_label,
+                    sheet_label=catch_sheet,
                     job_name="catch_orders",
                     primary_registry="catch-order",
                     primary_collection=ORDER_COLLECTION,
                     dry_run=False,
                     interactive=interactive,
+                    user_logger=user_logger,
+                    state_file_path=state_path,
                 )
             if stray_rows and not stopped:
                 stopped = _process_job_with_resume(
@@ -3935,11 +4254,14 @@ def main():
                     state=state,
                     workbook_key=workbook_key,
                     workbook_label=workbook_label,
+                    sheet_label=stray_sheet,
                     job_name="stray_animals",
                     primary_registry="stray",
                     primary_collection=TARGET_COLLECTION,
                     dry_run=False,
                     interactive=interactive,
+                    user_logger=user_logger,
+                    state_file_path=state_path,
                 )
             if card_rows and not stopped:
                 stopped = _process_job_with_resume(
@@ -3955,11 +4277,14 @@ def main():
                     state=state,
                     workbook_key=workbook_key,
                     workbook_label=workbook_label,
+                    sheet_label=card_sheet,
                     job_name="animal_cards",
                     primary_registry="card",
                     primary_collection=CARD_COLLECTION,
                     dry_run=False,
                     interactive=interactive,
+                    user_logger=user_logger,
+                    state_file_path=state_path,
                 )
     else:
         set_active_files_dir(FILES_DIR)
@@ -3978,11 +4303,19 @@ def main():
                 STRAY_PART_GLOB,
                 CARD_PART_GLOB,
             )
+            _log_user_run_summary(user_logger=user_logger, created_items=created_items, errors=errors, stopped=True)
             return 1
 
         catch_rows = _apply_limit(_with_row_numbers(load_rows_from_files(catch_files, logger, "CATCH"), 1), args.limit) if catch_files else []
         stray_rows = _apply_limit(_with_row_numbers(load_rows_from_files(stray_files, logger, "STRAY"), 1), args.limit) if stray_files else []
         card_rows = _apply_limit(_with_row_numbers(load_rows_from_files(card_files, logger, "CARD"), 1), args.limit) if card_files else []
+        if user_logger:
+            user_logger.info(
+                "=== Обработка JSON-входа: catch=%s, stray=%s, card=%s ===",
+                len(catch_rows),
+                len(stray_rows),
+                len(card_rows),
+            )
 
         if catch_rows and not stopped:
             stopped = _process_job_with_resume(
@@ -3998,11 +4331,14 @@ def main():
                 state=state,
                 workbook_key="__json__",
                 workbook_label="json",
+                sheet_label="JSON вход (без листа)",
                 job_name="catch_orders",
                 primary_registry="catch-order",
                 primary_collection=ORDER_COLLECTION,
                 dry_run=False,
                 interactive=interactive,
+                user_logger=user_logger,
+                state_file_path=state_path,
             )
         if stray_rows and not stopped:
             stopped = _process_job_with_resume(
@@ -4018,11 +4354,14 @@ def main():
                 state=state,
                 workbook_key="__json__",
                 workbook_label="json",
+                sheet_label="JSON вход (без листа)",
                 job_name="stray_animals",
                 primary_registry="stray",
                 primary_collection=TARGET_COLLECTION,
                 dry_run=False,
                 interactive=interactive,
+                user_logger=user_logger,
+                state_file_path=state_path,
             )
         if card_rows and not stopped:
             stopped = _process_job_with_resume(
@@ -4038,11 +4377,14 @@ def main():
                 state=state,
                 workbook_key="__json__",
                 workbook_label="json",
+                sheet_label="JSON вход (без листа)",
                 job_name="animal_cards",
                 primary_registry="card",
                 primary_collection=CARD_COLLECTION,
                 dry_run=False,
                 interactive=interactive,
+                user_logger=user_logger,
+                state_file_path=state_path,
             )
 
     if session is not None and VERIFY_CREATED:
@@ -4052,6 +4394,7 @@ def main():
     logger.info("Created: %s", json.dumps(created_items, ensure_ascii=False, indent=2))
     logger.info("Errors: %s", json.dumps(errors, ensure_ascii=False, indent=2))
     print_rollback("final-summary", rollback_candidates, logger)
+    _log_user_run_summary(user_logger=user_logger, created_items=created_items, errors=errors, stopped=stopped)
 
     if stopped:
         logger.warning("Processing stopped due to configured stop flags")

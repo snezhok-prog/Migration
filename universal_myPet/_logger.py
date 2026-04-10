@@ -36,6 +36,7 @@ def setup_logger():
     sh.setFormatter(formatter)
     logger.addHandler(sh)
 
+    logger.log_path = log_path
     logger.info("Запуск скрипта. Лог: %s", log_path)
     return logger
 
@@ -53,6 +54,8 @@ def setup_success_logger():
     fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     fh.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(fh)
+
+    logger.log_path = log_path
     return logger
 
 
@@ -69,6 +72,8 @@ def setup_fail_logger():
     fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
     fh.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(fh)
+
+    logger.log_path = log_path
     return logger
 
 
@@ -91,5 +96,24 @@ def setup_rollback_logger():
     sh = logging.StreamHandler()
     sh.setFormatter(formatter)
     logger.addHandler(sh)
+
+    logger.log_path = log_path
     return logger
 
+
+def setup_user_logger():
+    logs_dir = _ensure_logs_dir()
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_path = os.path.join(logs_dir, f"user_log-{timestamp}.txt")
+
+    logger = logging.getLogger("migration_user")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    _reset_logger_handlers(logger)
+
+    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    fh.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+    logger.addHandler(fh)
+
+    logger.log_path = log_path
+    return logger
