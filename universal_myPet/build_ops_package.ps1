@@ -27,7 +27,7 @@ $robocopyArgs = @(
     $projectDir,
     $stageDir,
     "/E",
-    "/XD", "__pycache__", "logs", "dist", ".git",
+    "/XD", "__pycache__", "logs", "dist", ".git", "PSI_test", "test_books", "state",
     "/XF", "*.pyc", "~$*.xlsm", "run_*.cmd", "build_ops_package.ps1"
 )
 

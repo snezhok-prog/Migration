@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+import traceback
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -160,6 +161,78 @@ def _extract_failed_uploads(error_obj: Any) -> List[Dict[str, str]]:
     return out
 
 
+def _indent_text(text: str, prefix: str = "  ") -> str:
+    raw = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not raw:
+        return ""
+    return "\n".join((prefix + line) if line else prefix.rstrip() for line in raw.split("\n"))
+
+
+def _pretty_json(value: Any) -> str:
+    try:
+        return json.dumps(value, ensure_ascii=False, indent=2)
+    except Exception:
+        return str(value)
+
+
+def _build_row_error_block(
+    *,
+    workbook_label: str,
+    sheet_label: str,
+    job_name: str,
+    primary_registry: str,
+    error_item: Dict[str, Any],
+    action_label: str,
+    row_migrated: bool,
+    stopped: bool,
+    state_file_path: str,
+) -> str:
+    registry_name = as_string_or_null(error_item.get("registry")) or primary_registry
+    stage = as_string_or_null(error_item.get("stage")) or "create"
+    row_num = _error_row_index(error_item)
+    error_obj = error_item.get("error")
+    error_text = _format_operator_error(error_obj)
+    failed_uploads = _extract_failed_uploads(error_obj)
+
+    lines = [
+        "",
+        "=" * 92,
+        "ОШИБКА СТРОКИ",
+        "-" * 92,
+        f"Таблица         : {workbook_label}",
+        f"Лист            : {sheet_label or _fallback_sheet_label(job_name)}",
+        f"Раздел          : {_job_display_name(job_name)} ({job_name})",
+        f"Реестр          : {_registry_display_name(registry_name)} ({registry_name})",
+        f"Строка Excel    : {row_num if row_num is not None else '-'}",
+        f"Этап            : {stage}",
+        f"Краткая ошибка  : {error_text}",
+    ]
+
+    if failed_uploads:
+        lines.append("-" * 92)
+        lines.append("Файлы/поля с ошибкой:")
+        for idx, item in enumerate(failed_uploads, start=1):
+            lines.append(f"  {idx}. поле   : {item.get('path') or '-'}")
+            lines.append(f"     файл       : {item.get('filename') or '-'}")
+            lines.append(f"     причина    : {item.get('reason') or '-'}")
+
+    lines.append("-" * 92)
+    lines.append(f"Действие        : {action_label}")
+    lines.append(f"Строка мигрир.  : {'ДА' if row_migrated else 'НЕТ'}")
+    if stopped:
+        lines.append("Статус          : миграция остановлена.")
+        lines.append(f"Как продолжить  : повторите запуск (resume использует {state_file_path})")
+        lines.append("Как откатить    : python rollback.py (или rollback_orders.py / rollback_stray.py / rollback_cards.py)")
+    else:
+        lines.append("Статус          : миграция продолжена.")
+
+    lines.append("-" * 92)
+    lines.append("Полный объект ошибки:")
+    lines.append(_indent_text(_pretty_json(error_obj), prefix="  "))
+    lines.append("=" * 92)
+    return "\n".join(lines)
+
+
 def _row_has_primary_success(items: List[Dict[str, Any]], start_idx: int, row_num: int, primary_registry: str) -> bool:
     for item in items[start_idx:]:
         if str(item.get("registry") or "") != str(primary_registry or ""):
@@ -187,15 +260,19 @@ def _log_user_run_header(
     if user_logger is None:
         return
     lines = [
+        "",
+        "#" * 92,
         "===== СТАРТ МИГРАЦИИ =====",
-        f"Профиль: {profile}",
-        f"Стенд: {base_url}",
-        f"Режим: {mode}",
-        f"Интерактивный режим: {'да' if interactive else 'нет'}",
-        f"Operator mode: {'включен' if operator_mode else 'выключен'}",
-        f"Файл checkpoints: {state_file_path}",
-        f"Лог успехов: {success_log_path or '-'}",
-        f"Лог ошибок: {fail_log_path or '-'}",
+        "-" * 92,
+        f"Профиль         : {profile}",
+        f"Стенд           : {base_url}",
+        f"Режим           : {mode}",
+        f"Интерактивный   : {'да' if interactive else 'нет'}",
+        f"Operator mode   : {'включен' if operator_mode else 'выключен'}",
+        f"checkpoints     : {state_file_path}",
+        f"Лог успехов     : {success_log_path or '-'}",
+        f"Лог ошибок      : {fail_log_path or '-'}",
+        "#" * 92,
     ]
     user_logger.info("\n".join(lines))
 
@@ -212,54 +289,27 @@ def _log_user_row_error(
     row_migrated: bool,
     stopped: bool,
     state_file_path: str,
+    console_logger=None,
 ):
     if user_logger is None or not isinstance(error_item, dict):
-        return
+        if console_logger is None or not isinstance(error_item, dict):
+            return
 
-    registry_name = as_string_or_null(error_item.get("registry")) or primary_registry
-    stage = as_string_or_null(error_item.get("stage")) or "create"
-    row_num = _error_row_index(error_item)
-    error_obj = error_item.get("error")
-    error_text = _format_operator_error(error_obj)
-    failed_uploads = _extract_failed_uploads(error_obj)
-
-    lines = [
-        "----- ОШИБКА СТРОКИ -----",
-        f"Таблица: {workbook_label}",
-        f"Лист: {sheet_label or _fallback_sheet_label(job_name)}",
-        f"Раздел: {_job_display_name(job_name)} ({job_name})",
-        f"Реестр: {_registry_display_name(registry_name)} ({registry_name})",
-        f"Строка Excel: {row_num if row_num is not None else '-'}",
-        f"Этап: {stage}",
-        f"Ошибка: {error_text}",
-    ]
-    if failed_uploads:
-        lines.append("Детали по полям/файлам:")
-        for item in failed_uploads:
-            lines.append(
-                "  поле=%s | файл=%s | причина=%s"
-                % (item.get("path") or "-", item.get("filename") or "-", item.get("reason") or "-")
-            )
-
-    lines.extend(
-        [
-            f"Действие после ошибки: {action_label}",
-            f"Строка мигрирована: {'ДА' if row_migrated else 'НЕТ'}",
-        ]
+    block = _build_row_error_block(
+        workbook_label=workbook_label,
+        sheet_label=sheet_label,
+        job_name=job_name,
+        primary_registry=primary_registry,
+        error_item=error_item,
+        action_label=action_label,
+        row_migrated=row_migrated,
+        stopped=stopped,
+        state_file_path=state_file_path,
     )
-
-    if stopped:
-        lines.extend(
-            [
-                "Статус: миграция остановлена.",
-                f"Как продолжить: повторите запуск этим же скриптом (resume использует {state_file_path}).",
-                "Как откатить: python rollback.py (или rollback_orders.py / rollback_stray.py / rollback_cards.py).",
-            ]
-        )
-    else:
-        lines.append("Статус: миграция продолжена.")
-
-    user_logger.info("\n".join(lines))
+    if user_logger is not None:
+        user_logger.info(block)
+    if console_logger is not None:
+        console_logger.warning("%s", block)
 
 
 def _log_user_run_summary(*, user_logger, created_items: List[Dict[str, Any]], errors: List[Dict[str, Any]], stopped: bool):
@@ -272,11 +322,15 @@ def _log_user_run_summary(*, user_logger, created_items: List[Dict[str, Any]], e
         if isinstance(item, dict) and item.get("resumed"):
             resumed_total += 1
     lines = [
+        "",
+        "#" * 92,
         "===== ФИНИШ МИГРАЦИИ =====",
-        f"Создано/подтверждено записей: {created_total}",
-        f"Ошибок строк: {error_total}",
-        f"Resume-строк (пропущено как уже обработанные): {resumed_total}",
-        f"Итоговый статус: {'ОСТАНОВЛЕНО' if stopped else 'ЗАВЕРШЕНО'}",
+        "-" * 92,
+        f"Создано/подтверждено: {created_total}",
+        f"Ошибок строк       : {error_total}",
+        f"Resume-пропусков   : {resumed_total}",
+        f"Итоговый статус    : {'ОСТАНОВЛЕНО' if stopped else 'ЗАВЕРШЕНО'}",
+        "#" * 92,
     ]
     user_logger.info("\n".join(lines))
 
@@ -942,7 +996,14 @@ def serialize_exception(exc):
         if exc.data is not None:
             out["data"] = exc.data
         return out
-    return str(exc)
+    out = {"message": str(exc), "type": exc.__class__.__name__}
+    try:
+        tb = traceback.format_exc()
+    except Exception:
+        tb = ""
+    if tb and "NoneType: None" not in tb:
+        out["traceback"] = tb
+    return out
 
 
 def log_processing_exception(logger, label: str, row_num: int, exc: Exception):
@@ -3944,6 +4005,7 @@ def _process_job_with_resume(
                                 row_migrated=row_success,
                                 stopped=(action == "abort"),
                                 state_file_path=state_file_path,
+                                console_logger=logger,
                             )
                         if action == "retry":
                             del errors[errors_before:]
@@ -3974,6 +4036,7 @@ def _process_job_with_resume(
                                 row_migrated=True,
                                 stopped=(action == "abort"),
                                 state_file_path=state_file_path,
+                                console_logger=logger,
                             )
                         if action == "abort":
                             _log_operator_stop(row_num)
@@ -3998,6 +4061,7 @@ def _process_job_with_resume(
                             row_migrated=False,
                             stopped=(action == "abort"),
                             state_file_path=state_file_path,
+                            console_logger=logger,
                         )
                     if action == "retry":
                         del errors[errors_before:]
@@ -4051,6 +4115,7 @@ def _process_job_with_resume(
                 row_migrated=row_migrated,
                 stopped=is_stop_error,
                 state_file_path=state_file_path,
+                console_logger=logger,
             )
     return stopped
 
