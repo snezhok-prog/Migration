@@ -121,7 +121,6 @@ REGISTRY_DISPLAY_NAMES = {
 ALLOWED_EVENT_CODES_FOR_RELEASE_AND_TRANSFER = {
     "deworming",
     "disinsection",
-    "disinfection",
     "vaccination",
     "sterilization",
     "identificationTagApplying",
