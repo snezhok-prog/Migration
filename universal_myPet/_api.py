@@ -31,16 +31,21 @@ class ApiCallError(RuntimeError):
 
 _RUNTIME_BASE_URL = str(BASE_URL).rstrip("/")
 _RUNTIME_JWT_URL = str(JWT_URL or (str(BASE_URL).rstrip("/") + "/jwt/")).strip()
+_RUNTIME_UI_BASE_URL = str(BASE_URL).rstrip("/")
 
 
-def set_runtime_urls(base_url=None, jwt_url=None):
-    global _RUNTIME_BASE_URL, _RUNTIME_JWT_URL
+def set_runtime_urls(base_url=None, jwt_url=None, ui_base_url=None):
+    global _RUNTIME_BASE_URL, _RUNTIME_JWT_URL, _RUNTIME_UI_BASE_URL
     if base_url:
         _RUNTIME_BASE_URL = str(base_url).strip().rstrip("/")
     if jwt_url:
         _RUNTIME_JWT_URL = str(jwt_url).strip()
     elif _RUNTIME_BASE_URL and not _RUNTIME_JWT_URL:
         _RUNTIME_JWT_URL = _RUNTIME_BASE_URL + "/jwt/"
+    if ui_base_url:
+        _RUNTIME_UI_BASE_URL = str(ui_base_url).strip().rstrip("/")
+    elif base_url:
+        _RUNTIME_UI_BASE_URL = _RUNTIME_BASE_URL
 
 
 def get_runtime_base_url():
@@ -49,6 +54,10 @@ def get_runtime_base_url():
 
 def get_runtime_jwt_url():
     return _RUNTIME_JWT_URL
+
+
+def get_runtime_ui_base_url():
+    return _RUNTIME_UI_BASE_URL
 
 
 def _build_url(path):

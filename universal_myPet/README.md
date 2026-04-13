@@ -92,6 +92,14 @@ python migration.py --profile custom --base-url "https://your-stand" --jwt-url "
 
 Профили и URL заданы в `_profiles.py`.
 
+Важно: межреестровые ссылки в данных (`...RecordLink`, `animalRegistryLink`) теперь формируются по публичному UI-домену профиля
+(`psi.pgs.gosuslugi.ru`, `pgs.gosuslugi.ru`, `iam...dev`), а не по внутреннему `*-inner` API-домену.
+При `--profile custom` можно явно задать публичный домен флагом:
+
+```bash
+python migration.py --profile custom --base-url "https://internal-stand" --jwt-url "https://internal-stand/jwt/" --ui-base-url "https://public-ui-stand"
+```
+
 ## Передача в эксплуатацию
 
 Перед передачей на новую ВМ:
@@ -152,6 +160,12 @@ python migration.py --profile dev --operator-mode
 python migration.py --reset-state
 python migration.py --no-resume
 python migration.py --state-file "custom_checkpoints.json"
+```
+
+Для нестандартного стенда отдельно задайте публичный URL для записываемых ссылок:
+
+```bash
+python migration.py --profile custom --ui-base-url "https://public-ui-stand"
 ```
 
 ## Очистка и откат

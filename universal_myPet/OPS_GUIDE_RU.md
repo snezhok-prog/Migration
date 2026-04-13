@@ -185,6 +185,7 @@ python rollback_cards.py
 ## 10. Полезные флаги (кратко)
 
 - `--profile {custom,dev,psi,prod}` — выбор стенда.
+- `--ui-base-url` — публичный домен для межреестровых ссылок в данных (`...RecordLink`), если API-домен внутренний.
 - `--auth-only` — только проверка авторизации.
 - `--dry-run` — без create/update запросов.
 - `--skip-auth` — только с dry-run.

@@ -16,6 +16,7 @@ from _api import (
     ApiCallError,
     create_record,
     get_runtime_base_url,
+    get_runtime_ui_base_url,
     search_collection,
     set_runtime_urls,
     setup_session,
@@ -115,6 +116,16 @@ REGISTRY_DISPLAY_NAMES = {
     "release-act": "Реестр актов выпуска",
     "death-act": "Реестр актов о смерти",
     "transfer-owner-act": "Реестр актов передачи владельцу",
+}
+
+ALLOWED_EVENT_CODES_FOR_RELEASE_AND_TRANSFER = {
+    "deworming",
+    "disinsection",
+    "disinfection",
+    "vaccination",
+    "sterilization",
+    "identificationTagApplying",
+    "other",
 }
 
 
@@ -669,23 +680,23 @@ def dclone(obj):
 
 
 def ui_catch_order_link(_id):
-    return f"{get_runtime_base_url()}{UI_CATCH_ORDER_EDIT_PATH}/{_id}"
+    return f"{get_runtime_ui_base_url()}{UI_CATCH_ORDER_EDIT_PATH}/{_id}"
 
 
 def ui_animal_link(_id):
-    return f"{get_runtime_base_url()}{UI_ANIMAL_EDIT_PATH}/{_id}"
+    return f"{get_runtime_ui_base_url()}{UI_ANIMAL_EDIT_PATH}/{_id}"
 
 
 def ui_catch_act_link(_id):
-    return f"{get_runtime_base_url()}{UI_CATCH_ACT_EDIT_PATH}/{_id}"
+    return f"{get_runtime_ui_base_url()}{UI_CATCH_ACT_EDIT_PATH}/{_id}"
 
 
 def ui_release_link(_id):
-    return f"{get_runtime_base_url()}{UI_RELEASE_ACT_EDIT_PATH}/{_id}"
+    return f"{get_runtime_ui_base_url()}{UI_RELEASE_ACT_EDIT_PATH}/{_id}"
 
 
 def ui_transfer_act_link(_id):
-    return f"{get_runtime_base_url()}{UI_TRANSFER_ACT_EDIT_PATH}/{_id}"
+    return f"{get_runtime_ui_base_url()}{UI_TRANSFER_ACT_EDIT_PATH}/{_id}"
 
 
 def rollback_body_payload(rollback_candidates):
@@ -1480,6 +1491,10 @@ def build_catch_info_stray(row):
         "catchDate": catch_date,
         "catchAddress": build_address(row.get("catchAddress") or row.get("locationAddress") or ""),
     }
+    if row.get("municipalContractNumber"):
+        info["municipalContractNumber"] = as_string_or_null(row.get("municipalContractNumber"))
+    if row.get("municipalContractDate"):
+        info["municipalContractDate"] = to_iso_z(row.get("municipalContractDate"))
     if row.get("catchActNumber"):
         info["catchActNumber"] = as_string_or_null(row.get("catchActNumber"))
     if row.get("catchActDate"):
@@ -1614,11 +1629,16 @@ def build_catch_act_record(row, unit, animal_doc, animal_id, catch_order_link):
             "catchEndTime": as_string_or_null(row.get("catchEndTime")),
             "catchAddress": build_address(row.get("catchAddress") or row.get("locationAddress") or ""),
             "hunterFullName": as_string_or_null(row.get("catcherFIO")),
+            "municipalContractNumber": as_string_or_null(row.get("municipalContractNumber")),
+            "municipalContractDate": to_iso_z(row.get("municipalContractDate")),
+            "videoBlock": [],
+            "explanatoryNoteFile": [],
         },
         "actData": {
             "actDate": to_iso_z(row.get("catchActDate")) or to_iso_z(row.get("catchEndDate")) or None,
             "org": as_string_or_null(row.get("authorizedOrgName")) or as_string_or_null(row.get("catchOrgName")) or None,
             "actNumber": as_string_or_null(row.get("catchActNumber")),
+            "catchActFile": [],
         },
     }
     return {"record": doc, "pendingUploads": collect_act_pending_uploads(row)}
@@ -2361,6 +2381,7 @@ def build_events_card(row, animal_obj):
         s = sterilizations[0] or {}
         obj = {
             **snap,
+            "dosage": as_string_or_null(s.get("dosage") or s.get("dose")),
             "executionDate": to_iso_z(s.get("date")),
             "employeeFullName": as_string_or_null(s.get("employeeFIO")),
             "employeePosition": as_string_or_null(s.get("employeePosition")),
@@ -2475,6 +2496,18 @@ def build_events_card(row, animal_obj):
         events.append({"eventType": {"code": "other", "name": "Иное мероприятие"}, "other": arr})
 
     return {"events": events, "indexMap": index_map}
+
+
+def filter_events_for_release_and_transfer(events):
+    out = []
+    for item in _list_or_empty(events):
+        if not isinstance(item, dict):
+            continue
+        event_type = item.get("eventType") if isinstance(item.get("eventType"), dict) else {}
+        code = as_string_or_null(event_type.get("code"))
+        if code in ALLOWED_EVENT_CODES_FOR_RELEASE_AND_TRANSFER:
+            out.append(dclone(item))
+    return out
 
 
 def build_release_info(row):
@@ -2871,7 +2904,7 @@ def build_release_act_record(row, resolved_orgs, card_record):
     receiver_type = detect_animal_receiver_type(r)
 
     animal = dclone((card_record or {}).get("animal") or {})
-    events = dclone((card_record or {}).get("events") or [])
+    events = filter_events_for_release_and_transfer((card_record or {}).get("events") or [])
     animal["events"] = events
     catch_address = build_minimal_address(r.get("releaseAddressObj") or r.get("releaseAddress"), row.get("region"))
     if catch_address:
@@ -2957,7 +2990,7 @@ def build_death_act_record(row, resolved_orgs, card_record):
     receiver_type = detect_animal_receiver_type(d)
 
     animal = dclone((card_record or {}).get("animal") or {})
-    events = dclone((card_record or {}).get("events") or [])
+    events = filter_events_for_release_and_transfer((card_record or {}).get("events") or [])
     animal["events"] = events
     catch_addr = build_minimal_address(
         d.get("shelterAddressObj") or d.get("shelterAddress") or d.get("pvsAddressObj") or d.get("pvsAddress"),
@@ -3053,7 +3086,7 @@ def build_transfer_owner_act_record(row, resolved_orgs, card_record):
     receiver_type = detect_animal_receiver_type(t)
 
     animal = dclone((card_record or {}).get("animal") or {})
-    events = dclone((card_record or {}).get("events") or [])
+    events = filter_events_for_release_and_transfer((card_record or {}).get("events") or [])
     animal["events"] = events
     catch_addr = build_minimal_address(
         t.get("shelterAddressObj") or t.get("shelterAddress") or t.get("pvsAddressObj") or t.get("pvsAddress"),
@@ -3162,7 +3195,7 @@ def pick_animal_mini(card_animal, row):
 
 def build_animal_shelter_from_card(card_record):
     animal = dclone((card_record or {}).get("animal") or {})
-    events = dclone((card_record or {}).get("events") or [])
+    events = filter_events_for_release_and_transfer((card_record or {}).get("events") or [])
     animal["events"] = events
     return animal
 
@@ -3704,21 +3737,25 @@ def _setup_runtime_profile(args) -> str:
     profile_name = str(args.profile or "custom").strip().lower()
     base_url = BASE_URL
     jwt_url = JWT_URL
+    ui_base_url = base_url
 
     if profile_name in PROFILES and profile_name != "custom":
         profile = PROFILES[profile_name]
         base_url = profile.base_url
         jwt_url = profile.jwt_url
+        ui_base_url = profile.ui_base_url or profile.base_url
 
     if str(args.base_url or "").strip():
         base_url = str(args.base_url).strip()
     if str(args.jwt_url or "").strip():
         jwt_url = str(args.jwt_url).strip()
+    if str(args.ui_base_url or "").strip():
+        ui_base_url = str(args.ui_base_url).strip()
 
     if not jwt_url:
         jwt_url = base_url.rstrip("/") + "/jwt/"
 
-    set_runtime_urls(base_url=base_url, jwt_url=jwt_url)
+    set_runtime_urls(base_url=base_url, jwt_url=jwt_url, ui_base_url=ui_base_url)
 
     normalized = str(base_url or "").strip().rstrip("/")
     for name, profile in PROFILES.items():
@@ -3732,6 +3769,7 @@ def _parse_args():
     parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="psi")
     parser.add_argument("--base-url", default="", help="Переопределить базовый URL стенда.")
     parser.add_argument("--jwt-url", default="", help="Переопределить URL страницы JWT для автообновления.")
+    parser.add_argument("--ui-base-url", default="", help="Переопределить публичный URL, который сохраняется в межреестровых ссылках.")
     parser.add_argument("--mode", choices=["auto", "single", "mass"], default="auto")
     parser.add_argument("--workbooks", default="", help="Явный список книг (разделитель ';' или новая строка).")
     parser.add_argument("--files-map", default="", help="Связка книга->папка файлов: 'book1.xlsm=one;book2.xlsm=two'.")
