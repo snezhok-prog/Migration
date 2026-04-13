@@ -7,6 +7,7 @@ import sys
 import traceback
 import warnings
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -343,6 +344,88 @@ def _log_user_run_summary(*, user_logger, created_items: List[Dict[str, Any]], e
         "#" * 92,
     ]
     user_logger.info("\n".join(lines))
+
+
+def _console_block(title: str, lines: Optional[List[str]] = None, width: int = 92) -> str:
+    safe_title = str(title or "").strip() or "Инфо"
+    content = ["", "=" * width, safe_title, "-" * width]
+    for line in (lines or []):
+        content.append(str(line))
+    content.append("=" * width)
+    return "\n".join(content)
+
+
+def _format_iso_for_console(value: Any) -> str:
+    raw = as_string_or_null(value)
+    if not raw:
+        return "-"
+    text = str(raw).strip()
+    if not text:
+        return "-"
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return text
+
+
+def _choose_resume_strategy(*, state: ResumeState, logger, user_logger, interactive: bool) -> str:
+    if not state.enabled:
+        return "continue"
+    rows_count = state.rows_count()
+    if rows_count <= 0:
+        return "continue"
+
+    run_info = state.get_run_info()
+    status = str(run_info.get("status") or "").strip().lower()
+    incomplete_statuses = {"running", "stopped", "aborted", "interrupted", "failed", "error"}
+    should_offer = status in incomplete_statuses or status == ""
+    if not should_offer:
+        return "continue"
+
+    last_checkpoint = run_info.get("lastCheckpoint") if isinstance(run_info.get("lastCheckpoint"), dict) else {}
+    workbooks = run_info.get("workbooks") if isinstance(run_info.get("workbooks"), list) else []
+    lines = [
+        "Обнаружены незавершенные checkpoints прошлой миграции.",
+        "",
+        f"Статус прошлого запуска : {status or 'неизвестно (старый формат)'}",
+        f"Старт запуска          : {_format_iso_for_console(run_info.get('startedAt'))}",
+        f"Финиш запуска          : {_format_iso_for_console(run_info.get('finishedAt'))}",
+        f"Профиль / стенд        : {run_info.get('profile') or '-'} / {run_info.get('baseUrl') or '-'}",
+        f"Книг в запуске         : {len(workbooks) if workbooks else '-'}",
+        f"Строк в checkpoint     : {rows_count}",
+        f"Последняя точка        : {last_checkpoint.get('job') or '-'} / row={last_checkpoint.get('row') or '-'}",
+        f"Последняя запись _id   : {last_checkpoint.get('_id') or '-'}",
+    ]
+    if workbooks:
+        lines.append("Книги запуска          : " + "; ".join(str(x) for x in workbooks[:3]))
+    block = _console_block("RESUME: найдена незавершенная миграция", lines)
+    logger.warning("%s", block)
+    if user_logger:
+        user_logger.info(block)
+
+    if not interactive:
+        logger.info("Интерактив отключен, автоматически продолжаем по checkpoint.")
+        return "continue"
+
+    prompt = (
+        "\n[RESUME] Действие: [П]родолжить по checkpoints / [С]бросить checkpoints и начать заново / [В]ыйти: "
+    )
+    while True:
+        try:
+            raw = input(prompt)
+        except EOFError:
+            return "continue"
+        choice = norm_ru(raw)
+        if choice in {"", "п", "p", "продолжить", "continue", "resume"}:
+            return "continue"
+        if choice in {"с", "c", "сброс", "reset", "заново", "start"}:
+            return "reset"
+        if choice in {"в", "q", "quit", "выход", "exit", "abort"}:
+            return "abort"
 
 
 def set_active_files_dir(path: str):
@@ -3893,8 +3976,8 @@ def _process_job_with_resume(
     if not pending:
         return False
 
-    def _collect_error_rows(start_error_idx: int) -> set:
-        rows_with_errors = set()
+    def _collect_error_rows(start_error_idx: int) -> Dict[int, int]:
+        rows_with_errors: Dict[int, int] = {}
         for err in errors[start_error_idx:]:
             if not isinstance(err, dict):
                 continue
@@ -3903,7 +3986,8 @@ def _process_job_with_resume(
                 continue
             idx = err.get("index")
             try:
-                rows_with_errors.add(int(idx))
+                row_idx = int(idx)
+                rows_with_errors[row_idx] = rows_with_errors.get(row_idx, 0) + 1
             except Exception:
                 continue
         return rows_with_errors
@@ -3924,14 +4008,8 @@ def _process_job_with_resume(
                 row_idx_int = int(row_num)
             except Exception:
                 continue
-            if row_idx_int in rows_with_errors:
-                logger.warning(
-                    "[RESUME] row=%s in %s/%s had errors in this run; checkpoint is not saved for automatic skip",
-                    row_idx_int,
-                    workbook_label,
-                    job_name,
-                )
-                continue
+            had_errors = row_idx_int in rows_with_errors
+            error_count = rows_with_errors.get(row_idx_int, 0)
             state.mark_success(
                 workbook_path=workbook_key,
                 job_name=job_name,
@@ -3939,7 +4017,17 @@ def _process_job_with_resume(
                 collection=primary_collection,
                 main_id=str(main_id),
                 guid=str(guid),
+                had_errors=had_errors,
+                error_count=error_count,
             )
+            if had_errors:
+                logger.warning(
+                    "[RESUME] row=%s in %s/%s had %s error(s), but primary record exists; checkpoint saved to avoid duplicate create",
+                    row_idx_int,
+                    workbook_label,
+                    job_name,
+                    error_count,
+                )
 
     def _operator_row_action(row_num: int, error_obj: Any) -> str:
         err_msg = _format_operator_error(error_obj)
@@ -4218,8 +4306,39 @@ def main():
     if args.reset_state:
         state.reset_namespace()
         logger.info("State reset completed for namespace")
+
+    if state_enabled and not args.reset_state:
+        resume_action = _choose_resume_strategy(
+            state=state,
+            logger=logger,
+            user_logger=user_logger,
+            interactive=interactive,
+        )
+        if resume_action == "reset":
+            state.reset_namespace()
+            logger.info("Resume checkpoints reset by operator decision.")
+        elif resume_action == "abort":
+            logger.warning("Run cancelled before start by operator decision.")
+            if user_logger:
+                user_logger.info("Запуск отменен оператором до старта миграции.")
+            return 0
+
     logger.info("Resume: enabled=%s state_file=%s namespace=%s", state_enabled, state_path, resume_namespace)
     logger.info("User log: %s", getattr(user_logger, "log_path", ""))
+    logger.info(
+        "%s",
+        _console_block(
+            "ПАРАМЕТРЫ ЗАПУСКА",
+            [
+                f"profile          : {effective_profile}",
+                f"base_url         : {get_runtime_base_url()}",
+                f"interactive      : {'yes' if interactive else 'no'}",
+                f"operator_mode    : {'on' if RUNTIME_OPERATOR_MODE else 'off'}",
+                f"resume_enabled   : {'yes' if state_enabled else 'no'}",
+                f"state_file       : {state_path}",
+            ],
+        ),
+    )
     _log_user_run_header(
         user_logger=user_logger,
         profile=effective_profile,
@@ -4251,6 +4370,20 @@ def main():
         logger.info("Auth-only mode completed")
         _log_user_run_summary(user_logger=user_logger, created_items=[], errors=[], stopped=False)
         return 0
+
+    run_started = False
+    if state_enabled and not args.dry_run:
+        workbook_targets = [os.path.abspath(spec.workbook_path) for spec in run_specs] if run_specs else ["__json__"]
+        state.begin_run(
+            profile=effective_profile,
+            baseUrl=get_runtime_base_url(),
+            mode=args.mode,
+            interactive=bool(interactive),
+            operatorMode=bool(RUNTIME_OPERATOR_MODE),
+            workbooks=workbook_targets,
+            stateFile=state_path,
+        )
+        run_started = True
 
     created_items = []
     errors = []
@@ -4290,7 +4423,16 @@ def main():
             if stopped:
                 break
             set_active_files_dir(spec.files_dir)
-            logger.info("Processing workbook: %s", spec.workbook_path)
+            logger.info(
+                "%s",
+                _console_block(
+                    "ОБРАБОТКА ТАБЛИЦЫ",
+                    [
+                        f"workbook : {spec.workbook_path}",
+                        f"files    : {spec.files_dir}",
+                    ],
+                ),
+            )
             parsed = load_rows_from_excel(spec.workbook_path, logger)
             catch_rows = _apply_limit(_with_row_numbers(parsed.get("catch") or [], EXCEL_DATA_START_ROW), args.limit)
             stray_rows = _apply_limit(_with_row_numbers(parsed.get("stray") or [], EXCEL_DATA_START_ROW), args.limit)
@@ -4393,6 +4535,7 @@ def main():
         catch_files = discover_input_files(CATCH_PART_GLOB)
         stray_files = discover_input_files(STRAY_PART_GLOB)
         card_files = discover_input_files(CARD_PART_GLOB)
+        logger.info("%s", _console_block("ОБРАБОТКА JSON-ВХОДА", [f"files_dir : {ACTIVE_FILES_DIR}"]))
         logger.info("[INPUT] catch files: %s", [os.path.basename(x) for x in catch_files] or "-")
         logger.info("[INPUT] stray files: %s", [os.path.basename(x) for x in stray_files] or "-")
         logger.info("[INPUT] card files: %s", [os.path.basename(x) for x in card_files] or "-")
@@ -4406,6 +4549,12 @@ def main():
                 CARD_PART_GLOB,
             )
             _log_user_run_summary(user_logger=user_logger, created_items=created_items, errors=errors, stopped=True)
+            if run_started and state_enabled:
+                state.finish_run(
+                    status="failed",
+                    summary={"created": len(created_items), "errors": len(errors), "stopped": True},
+                    clear_rows=False,
+                )
             return 1
 
         catch_rows = _apply_limit(_with_row_numbers(load_rows_from_files(catch_files, logger, "CATCH"), 1), args.limit) if catch_files else []
@@ -4498,8 +4647,38 @@ def main():
     print_rollback("final-summary", rollback_candidates, logger)
     _log_user_run_summary(user_logger=user_logger, created_items=created_items, errors=errors, stopped=stopped)
 
+    resumed_total = 0
+    for item in created_items:
+        if isinstance(item, dict) and item.get("resumed"):
+            resumed_total += 1
+
+    if run_started and state_enabled:
+        summary_payload = {
+            "created": len(created_items),
+            "errors": len(errors),
+            "resumed": resumed_total,
+            "stopped": bool(stopped),
+        }
+        if stopped:
+            state.finish_run(status="stopped", summary=summary_payload, clear_rows=False)
+        else:
+            state.finish_run(status="completed", summary=summary_payload, clear_rows=True)
+            logger.info("Resume checkpoints cleared after successful completion.")
+
     if stopped:
         logger.warning("Processing stopped due to configured stop flags")
+    logger.info(
+        "%s",
+        _console_block(
+            "ИТОГ ВЫПОЛНЕНИЯ",
+            [
+                f"created/confirmed : {len(created_items)}",
+                f"errors            : {len(errors)}",
+                f"resume-skipped    : {resumed_total}",
+                f"result            : {'stopped' if stopped else 'completed'}",
+            ],
+        ),
+    )
     return 0 if not stopped else 1
 
 
