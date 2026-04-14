@@ -528,40 +528,95 @@ def _infer_files_dir_for_workbook(
     interactive: bool,
     prompt_always: bool,
 ) -> str:
-    workbook_abs = str(Path(workbook_path).resolve())
-    workbook_name = Path(workbook_abs).name
-    workbook_stem = Path(workbook_abs).stem
-    mapped_raw = files_map.get(workbook_abs) or files_map.get(workbook_name) or files_map.get(workbook_stem)
+    workbook_abs = os.path.abspath(str(workbook_path))
+    workbook_name = os.path.basename(workbook_abs)
+    workbook_stem = os.path.splitext(workbook_name)[0]
 
-    default_dir = str(Path(files_root).resolve())
-    if mapped_raw:
-        mapped_path = Path(str(mapped_raw).strip())
-        if not mapped_path.is_absolute():
-            mapped_path = (Path(SCRIPT_DIR) / mapped_path).resolve()
-        default_dir = str(mapped_path)
-    else:
-        root = Path(default_dir)
-        if root.exists() and root.is_dir():
-            for hint in _numeric_hints(workbook_name):
-                for folder_name in (
-                    hint,
-                    f"part{hint}",
-                    f"book{hint}",
-                    "one" if hint == "1" else "",
-                    "two" if hint == "2" else "",
-                    "three" if hint == "3" else "",
-                ):
-                    if not folder_name:
-                        continue
-                    candidate = root / folder_name
-                    if candidate.exists() and candidate.is_dir():
-                        default_dir = str(candidate.resolve())
-                        break
+    for key in (workbook_abs, workbook_name, workbook_stem):
+        if key in files_map:
+            target = str(files_map[key]).strip()
+            if os.path.isabs(target):
+                return os.path.abspath(target)
+            return os.path.abspath(os.path.join(files_root, target))
 
-    if interactive and (prompt_always or not mapped_raw):
-        chosen = _prompt_with_default(f"Files directory for {workbook_name}", default_dir, True)
-        return str(Path(chosen).expanduser().resolve())
-    return str(Path(default_dir).expanduser().resolve())
+    subdirs: List[str] = []
+    if os.path.isdir(files_root):
+        for name in sorted(os.listdir(files_root), key=lambda x: x.lower()):
+            candidate = os.path.abspath(os.path.join(files_root, name))
+            if os.path.isdir(candidate):
+                subdirs.append(candidate)
+
+    auto_candidate = os.path.abspath(files_root)
+    same_name_dir = os.path.abspath(os.path.join(files_root, workbook_stem))
+    if os.path.isdir(same_name_dir):
+        auto_candidate = same_name_dir
+    elif subdirs:
+        stem_norm = workbook_stem.strip().lower()
+        matched: List[str] = []
+        exact_found = False
+        for subdir in subdirs:
+            name = os.path.basename(subdir).strip().lower()
+            if not name:
+                continue
+            if name == stem_norm:
+                auto_candidate = subdir
+                exact_found = True
+                break
+            if (" " + name + " ") in (" " + stem_norm + " ") or stem_norm.endswith(" " + name):
+                matched.append(subdir)
+
+        if not exact_found:
+            if len(matched) == 1:
+                auto_candidate = matched[0]
+            else:
+                workbook_hints = set(_numeric_hints(stem_norm))
+                hint_matches: List[str] = []
+                if workbook_hints:
+                    for subdir in subdirs:
+                        sub_hints = set(_numeric_hints(os.path.basename(subdir)))
+                        if workbook_hints.intersection(sub_hints):
+                            hint_matches.append(subdir)
+                if len(hint_matches) == 1:
+                    auto_candidate = hint_matches[0]
+
+            if auto_candidate == os.path.abspath(files_root):
+                if len(subdirs) == 2:
+                    default_like = [
+                        folder
+                        for folder in subdirs
+                        if os.path.basename(folder).strip().lower() in {"one", "1", "default", "main"}
+                    ]
+                    if len(default_like) == 1:
+                        auto_candidate = default_like[0]
+                elif len(subdirs) == 1:
+                    auto_candidate = subdirs[0]
+
+    if not interactive or not subdirs:
+        return auto_candidate
+
+    options = [os.path.abspath(files_root)] + subdirs
+    default_idx = 0
+    for idx, path in enumerate(options):
+        if os.path.abspath(path) == os.path.abspath(auto_candidate):
+            default_idx = idx
+            break
+
+    print(f"\nКнига: {workbook_name}")
+    print("Выберите папку с файлами:")
+    print(f"  0) {os.path.abspath(files_root)} (корень)")
+    for idx, folder in enumerate(subdirs, start=1):
+        print(f"  {idx}) {os.path.basename(folder)}")
+
+    raw = input(f"Номер папки [{default_idx}]: ").strip()
+    if not raw:
+        return options[default_idx]
+    try:
+        selected_idx = int(raw)
+    except Exception:
+        return options[default_idx]
+    if 0 <= selected_idx < len(options):
+        return options[selected_idx]
+    return options[default_idx]
 
 
 def _resolve_workbook_specs(args: argparse.Namespace, interactive: bool, logger) -> Tuple[List[WorkbookRunSpec], str]:
@@ -588,6 +643,12 @@ def _resolve_workbook_specs(args: argparse.Namespace, interactive: bool, logger)
     files_root = str(Path(args.files_dir).expanduser().resolve())
     files_map = parse_key_value_mapping(args.files_map)
 
+    prompt_files_for_each = bool(
+        interactive
+        and not files_map
+        and (bool(args.ask_files_always) or args.mode in {"mass", "auto"})
+    )
+
     specs: List[WorkbookRunSpec] = []
     for workbook_path in selected:
         workbook_abs = str(Path(workbook_path).expanduser().resolve())
@@ -596,7 +657,7 @@ def _resolve_workbook_specs(args: argparse.Namespace, interactive: bool, logger)
             files_root=files_root,
             files_map=files_map,
             interactive=interactive,
-            prompt_always=bool(args.ask_files_always),
+            prompt_always=prompt_files_for_each,
         )
         specs.append(WorkbookRunSpec(workbook_path=workbook_abs, files_dir=files_dir))
 
