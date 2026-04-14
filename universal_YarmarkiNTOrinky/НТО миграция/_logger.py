@@ -1,22 +1,24 @@
+﻿from __future__ import annotations
+
 import logging
 import os
 from datetime import datetime
 
 
-def _ensure_logs_dir():
+def _ensure_logs_dir() -> str:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     logs_dir = os.path.join(script_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
     return logs_dir
 
 
-def _reset_logger_handlers(logger):
+def _reset_logger_handlers(logger: logging.Logger) -> None:
     for handler in list(logger.handlers):
         logger.removeHandler(handler)
         handler.close()
 
 
-def setup_logger():
+def setup_logger() -> logging.Logger:
     logs_dir = _ensure_logs_dir()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = os.path.join(logs_dir, f"script_creation_log-{timestamp}.txt")
@@ -28,20 +30,20 @@ def setup_logger():
 
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
-    sh = logging.StreamHandler()
-    sh.setFormatter(formatter)
-    logger.addHandler(sh)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
 
     logger.log_path = log_path
     logger.info("Запуск скрипта. Лог: %s", log_path)
     return logger
 
 
-def setup_success_logger():
+def setup_success_logger() -> logging.Logger:
     logs_dir = _ensure_logs_dir()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = os.path.join(logs_dir, f"success_log-{timestamp}.txt")
@@ -51,15 +53,15 @@ def setup_success_logger():
     logger.propagate = False
     _reset_logger_handlers(logger)
 
-    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(fh)
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
 
     logger.log_path = log_path
     return logger
 
 
-def setup_fail_logger():
+def setup_fail_logger() -> logging.Logger:
     logs_dir = _ensure_logs_dir()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = os.path.join(logs_dir, f"fail_log-{timestamp}.txt")
@@ -69,15 +71,15 @@ def setup_fail_logger():
     logger.propagate = False
     _reset_logger_handlers(logger)
 
-    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(fh)
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(file_handler)
 
     logger.log_path = log_path
     return logger
 
 
-def setup_rollback_logger():
+def setup_rollback_logger() -> logging.Logger:
     logs_dir = _ensure_logs_dir()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = os.path.join(logs_dir, f"script_rollback_log-{timestamp}.txt")
@@ -89,19 +91,19 @@ def setup_rollback_logger():
 
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 
-    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
-    sh = logging.StreamHandler()
-    sh.setFormatter(formatter)
-    logger.addHandler(sh)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
 
     logger.log_path = log_path
     return logger
 
 
-def setup_user_logger():
+def setup_user_logger() -> logging.Logger:
     logs_dir = _ensure_logs_dir()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = os.path.join(logs_dir, f"user_log-{timestamp}.txt")
@@ -111,9 +113,9 @@ def setup_user_logger():
     logger.propagate = False
     _reset_logger_handlers(logger)
 
-    fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-    logger.addHandler(fh)
+    file_handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+    logger.addHandler(file_handler)
 
     logger.log_path = log_path
     return logger

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 
@@ -6,6 +6,7 @@ import os
 TEST = False
 
 BASE_URL = "https://iam.torknd-customer.dev.pd15.digitalgov.mtp"
+UI_BASE_URL = BASE_URL
 VERIFY_SSL = False
 JWT_URL = BASE_URL.rstrip("/") + "/jwt/"
 AUTO_JWT = False
@@ -25,6 +26,7 @@ RESUME_BY_DEFAULT = True
 ROLLBACK_BODY_FILE = os.path.join(SCRIPT_DIR, "ROLLBACK_BODY.json")
 SUCCESS_LOG_PATTERN = os.path.join(LOGS_DIR, "success_log-*.txt")
 EXCEL_FILE_NAME = "Форма_для_миграции_НТО.xlsm"
+EXCEL_INPUT_GLOB = "*.xlsm"
 
 SHEET_MESTO = "2. Реестр мест"
 SHEET_TORGI = "3. Реестр торгов"
@@ -45,5 +47,9 @@ DEFAULT_ORG = {
     "email": "cityhall@klgd.ru",
     "site": "http://www.klgd.ru",
     "phone": "(4012) 92-33-80,92-30-71",
-    "regions": {"_id": "5e7c84507e0daf0001872342", "code": "39", "name": "Калининградская область"},
+    "regions": {
+        "_id": "5e7c84507e0daf0001872342",
+        "code": "39",
+        "name": "Калининградская область",
+    },
 }

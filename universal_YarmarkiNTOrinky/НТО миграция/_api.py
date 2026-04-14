@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import mimetypes
 import re
@@ -18,6 +18,7 @@ from _config import (
     SAVE_AUTH,
     SCRIPT_DIR,
     TOKEN_FILE,
+    UI_BASE_URL,
     VERIFY_SSL,
 )
 from _utils import (
@@ -34,8 +35,40 @@ class ApiCallError(RuntimeError):
     pass
 
 
+_RUNTIME_BASE_URL = str(BASE_URL).rstrip("/")
+_RUNTIME_JWT_URL = str(JWT_URL or (str(BASE_URL).rstrip("/") + "/jwt/")).strip()
+_RUNTIME_UI_BASE_URL = str(UI_BASE_URL or BASE_URL).rstrip("/")
+
+
+def set_runtime_urls(base_url: Optional[str] = None, jwt_url: Optional[str] = None, ui_base_url: Optional[str] = None) -> None:
+    global _RUNTIME_BASE_URL, _RUNTIME_JWT_URL, _RUNTIME_UI_BASE_URL
+    if base_url:
+        _RUNTIME_BASE_URL = str(base_url).strip().rstrip("/")
+    if jwt_url:
+        _RUNTIME_JWT_URL = str(jwt_url).strip()
+    elif _RUNTIME_BASE_URL and not _RUNTIME_JWT_URL:
+        _RUNTIME_JWT_URL = _RUNTIME_BASE_URL + "/jwt/"
+
+    if ui_base_url:
+        _RUNTIME_UI_BASE_URL = str(ui_base_url).strip().rstrip("/")
+    elif base_url:
+        _RUNTIME_UI_BASE_URL = _RUNTIME_BASE_URL
+
+
+def get_runtime_base_url() -> str:
+    return _RUNTIME_BASE_URL
+
+
+def get_runtime_jwt_url() -> str:
+    return _RUNTIME_JWT_URL
+
+
+def get_runtime_ui_base_url() -> str:
+    return _RUNTIME_UI_BASE_URL
+
+
 def _build_url(path: str) -> str:
-    return BASE_URL.rstrip("/") + "/" + path.lstrip("/")
+    return _RUNTIME_BASE_URL + "/" + str(path or "").lstrip("/")
 
 
 def _safe_json(resp: requests.Response) -> Any:
@@ -55,7 +88,7 @@ def _apply_token_headers(session: requests.Session, token: str) -> None:
 
 def _apply_cookie_pairs(session: requests.Session, cookie_raw: str, logger) -> int:
     pairs = parse_cookie_pairs(cookie_raw)
-    host_match = re.match(r"^https?://([^/:]+)", BASE_URL.strip(), flags=re.IGNORECASE)
+    host_match = re.match(r"^https?://([^/:]+)", _RUNTIME_BASE_URL.strip(), flags=re.IGNORECASE)
     domain = host_match.group(1) if host_match else ""
     parsed = 0
     for name, value in pairs:
@@ -104,8 +137,9 @@ def _save_auth_if_needed(session: requests.Session, token: str, logger) -> None:
 
 def _refresh_token_from_jwt_page(session: requests.Session, logger) -> Optional[str]:
     candidates = []
-    if str(JWT_URL or "").strip():
-        candidates.extend([JWT_URL.rstrip("/") + "/", JWT_URL.rstrip("/") + "/?access=1"])
+    jwt_url = str(_RUNTIME_JWT_URL or "").strip()
+    if jwt_url:
+        candidates.extend([jwt_url.rstrip("/") + "/", jwt_url.rstrip("/") + "/?access=1"])
     candidates.extend([_build_url("/jwt/"), _build_url("/jwt/?access=1")])
     tried = set()
 
@@ -146,7 +180,7 @@ def setup_session(logger, no_prompt: bool = False) -> requests.Session:
     default_token = extract_jwt(read_text_if_exists(token_path))
     default_cookie = read_text_if_exists(cookie_path)
 
-    print("\nCookie and token can be read from files next to script:")
+    print("\nCookie и token можно взять из файлов рядом со скриптом:")
     print(f"  cookie: {cookie_path}")
     print(f"  token:  {token_path}")
 
@@ -154,7 +188,7 @@ def setup_session(logger, no_prompt: bool = False) -> requests.Session:
         cookie_input = ""
         token_input = ""
     else:
-        print("Press Enter to use file values.")
+        print("Нажмите Enter, чтобы использовать значения из файлов.")
         cookie_input = input("Cookie: ").replace("\ufeff", "").strip()
         token_input = input("JWT token: ").replace("\ufeff", "").strip()
 
@@ -169,8 +203,8 @@ def setup_session(logger, no_prompt: bool = False) -> requests.Session:
     session.headers.update(
         {
             "Accept": "application/json, text/plain, */*",
-            "Origin": BASE_URL,
-            "Referer": BASE_URL.rstrip("/") + "/",
+            "Origin": _RUNTIME_BASE_URL,
+            "Referer": _RUNTIME_BASE_URL + "/",
             "User-Agent": "Mozilla/5.0",
         }
     )
