@@ -1,343 +1,89 @@
-# RKN012 Migration Tool
+# Universal Markets Migration
 
-Инструмент для миграции данных в систему Роскомнадзора (RKN012) через API.
+Скрипт миграции для реестров рынков с унифицированным каркасом запуска, checkpoints/resume, operator-mode и логированием в стиле `universal_myPet`.
 
-## 📋 Описание
+## Структура
 
-Данный проект представляет собой набор утилит для автоматизированного создания обращений, под услуг, субъектов и документов в системе RKN012 через REST API.
+- `migration.py` — основной entrypoint миграции
+- `rollback.py` — откат записей по success-логам
+- `_api.py` — API клиент и авторизация (runtime URL по профилям)
+- `_profiles.py` — профили стендов `dev|psi|prod|custom`
+- `_excel_input.py` — поиск XLSM книг для single/mass режима
+- `_state.py` — checkpoints/resume состояние
+- `_logger.py` — script/success/fail/user/rollback логгеры
+- `_config.py` — базовая конфигурация
+- `_utils.py` — вспомогательные функции
+- `_templates.py` — шаблоны сущностей
+- `files/` — папка с файлами для загрузки
+- `logs/` — логи запусков
 
-## 🏗️ Структура проекта
+## Быстрый запуск
 
-```
-├── _config.py        # Конфигурация проекта
-├── _logger.py        # Настройка логирования
-├── _utils.py         # Вспомогательные функции
-├── _api.py           # Функции для работы с API
-├── _templates.py     # Шаблоны субъектов (ЮЛ и ИП)
-├── files/            # Директория для файлов миграции
-├── logs/             # Директория для логов
-└── README.md         # Документация
-```
+Из каталога `universal_YarmarkiNTOrinky/Рынки миграция`:
 
-## 📦 Требования
-
-- Python 3.8+
-- Библиотеки:
-  - `requests`
-  - `pandas`
-  - `openpyxl` (для чтения Excel)
-
-Установка зависимостей:
 ```bash
-pip install requests pandas openpyxl
+python migration.py --profile dev
 ```
 
-## ⚙️ Конфигурация
+## Режимы запуска
 
-### _config.py
+- `--mode auto|single|mass` — выбор одной или нескольких книг
+- `--workbook "<file.xlsm>"` — совместимый запуск одной книги
+- `--workbooks "a.xlsm;b.xlsm"` — явный список книг
+- `--files-dir "<dir>"` — базовая папка файлов
+- `--files-map "book1.xlsm=dir1;book2.xlsm=dir2"` — привязка книга->папка
+- `--ask-files-always` — спрашивать папку файлов для каждой книги
 
-Основные настройки в файле `_config.py`:
+## Авторизация и профили
 
-```python
-# URL API
-BASE_URL = "https://iam.torknd-customer.dev.pd15.digitalgov.mtp"
+- `--profile dev|psi|prod|custom`
+- `--base-url`, `--jwt-url`, `--ui-base-url` — переопределение URL
+- `--auth-only` — проверить авторизацию и завершить
+- `--skip-auth` — пропустить авторизацию (только с `--dry-run`)
+- `--no-prompt` — читать `cookie.md`/`token.md` без вопросов
 
-# Имя Excel файла с данными
-EXCEL_FILE_NAME = "ТЕСТ МИГРАЦИЯ 012.xlsx"
+## Checkpoints / Resume
 
-# Коды стандартов
-STANDARD_CODES = {
-    "Уведомление о вводе сети связи в эксплуатацию": "40692",
-}
+- `--resume` / `--no-resume`
+- `--state-file state/checkpoints.json`
+- `--reset-state` — очистить checkpoints перед запуском
 
-# Настройки подразделения
-UNIT = {
-    "id": "6650527c3000227496944b6b",
-    "name": "ООО Агентство \"Полилог\"",
-    "ogrn": "1027706014874",
-}
+Если предыдущий запуск был оборван/неуспешен, в интерактивном режиме скрипт предложит:
 
-# Поддерживаемые расширения файлов
-SUPPORTED_EXTENSIONS = [
-    '.pdf', '.xml', '.doc', '.docx', '.xls', '.xlsx',
-    '.jpg', '.jpeg', '.png', '.zip', '.txt', '.rtf',
-    # ... и другие
-]
+1. продолжить с checkpoint
+2. сбросить checkpoints
+3. выйти
+
+## Operator mode
+
+```bash
+python migration.py --profile dev --operator-mode
 ```
 
-## 🔐 Авторизация
+На ошибках строк можно выбрать `retry / skip / abort`. Для ошибок, где безопасный retry невозможен без перестройки маппинга, выполняется пропуск строки с логированием.
 
-Для работы с API необходимо:
+## Dry-run
 
-1. Открыть браузер и войти в систему
-2. Открыть DevTools (F12) → Network
-3. Выполнить любой запрос к API
-4. Скопировать заголовок `Cookie` из Request Headers
-5. Скопировать JWT токен
-
-При запуске скрипта будет запрошен ввод:
-```
-Cookie: PLATFORM_SESSION=...; XSRF-TOKEN=...; ...
-JWT токен: Bearer eyJhbGc...
+```bash
+python migration.py --profile dev --dry-run --skip-auth
 ```
 
-## 📖 Основные функции
+## Откат
 
-### Работа с Excel
-
-```python
-from _utils import read_excel
-
-df = read_excel("path/to/file.xlsx")
+```bash
+python rollback.py --profile dev
 ```
 
-Читает Excel файл, пропускает первые 4 строки, все значения как строки.
+С фильтром success-логов:
 
-### Форматирование телефонов
-
-```python
-from _utils import format_phone, format_multiple_phones
-
-# Одиночный телефон
-phone = format_phone("89141234567")
-# Результат: "+7 (914) 123 45 67"
-
-# Несколько телефонов (разделены ;)
-phones = format_multiple_phones("89141234567; 89147654321")
-# Результат: ["+7 (914) 123 45 67", "+7 (914) 765 43 21"]
+```bash
+python rollback.py --profile dev --success-log-glob "logs/success_log-2026-04-14_*.txt"
 ```
 
-### Работа с датами
+## Логи
 
-```python
-from _utils import to_iso_date, parse_date_to_birthday_obj
-
-# Преобразование в ISO формат
-iso_date = to_iso_date("31.12.2024")
-# Результат: "2024-12-31T00:00:00.000+0300"
-
-# Парсинг даты рождения
-birthday = parse_date_to_birthday_obj("31.12.1984")
-# Результат: {
-#   "date": {"year": 1984, "month": 12, "day": 31},
-#   "jsDate": "1984-12-30T21:00:00.000Z",
-#   "formatted": "31.12.1984",
-#   "epoc": 473288400
-# }
-```
-
-### Загрузка файлов
-
-```python
-from _api import upload_file, delete_file_from_storage
-
-# Загрузка файла
-result = upload_file(
-    session=session,
-    logger=logger,
-    file_path="/path/to/file.pdf",
-    entry_name="RKN012Appeals",
-    entry_id="appeal_id_123",
-    entity_field_path=""
-)
-
-# Удаление файла
-success = delete_file_from_storage(
-    session=session,
-    logger=logger,
-    file_id="file_id_123"
-)
-```
-
-### Создание обращения
-
-```python
-from _api import (
-    create_appeal_data,
-    create_subservice_data,
-    create_subject_data,
-    create_mainElement_data,
-    create_appeal_with_entities
-)
-
-# Создание данных обращения
-appeal_data = create_appeal_data(
-    unit=unit_info,
-    data={"number": "123", "pin": "0000"}
-)
-
-# Создание под услуги
-subservice_data = create_subservice_data(
-    subserviceTemplate=template,
-    data={"additional_field": "value"}
-)
-
-# Создание субъекта (ЮЛ или ИП)
-from _templates import SUBJECT_UL, SUBJECT_IP
-
-subject_data = create_subject_data(
-    template=SUBJECT_UL,  # или SUBJECT_IP
-    data={"xsdData": {"phone": "+7 (999) 123 45 67"}}
-)
-
-# Создание всех сущностей сразу
-success, appeal, subservice, subject, document = create_appeal_with_entities(
-    session=session,
-    logger=logger,
-    appeal_data=appeal_data,
-    subservice_data=subservice_data,
-    subject_data=subject_data,
-    document_data=document_data,
-    files_contents=[(base64_content, "file.pdf")]
-)
-```
-
-### Удаление записей
-
-```python
-from _api import delete_from_collection, find_in_collection
-
-# Удаление из коллекции
-success = delete_from_collection(
-    session=session,
-    logger=logger,
-    data={
-        "_id": "record_id",
-        "guid": "record_guid",
-        "parentEntries": "RKN012Appeals.subservices"
-    }
-)
-```
-
-## 📊 Шаблоны субъектов
-
-### Юридическое лицо (SUBJECT_UL)
-
-```python
-{
-    "kind": {
-        "subKind": {
-            "name": "Юридическое лицо",
-            "specialTypeId": "ulApplicant"
-        }
-    },
-    "data": {
-        "organization": {
-            "opf": {...},
-            "shortName": "Название организации",
-            "name": "Полное название",
-            "ogrn": "0000000000000",
-            "inn": "0000000000",
-            "kpp": "000000000",
-            "registrationAddress": {
-                "fullAddress": "Адрес"
-            }
-        }
-    }
-}
-```
-
-### Индивидуальный предприниматель (SUBJECT_IP)
-
-```python
-{
-    "kind": {
-        "subKind": {
-            "name": "Индивидуальный предприниматель",
-            "specialTypeId": "ipApplicant"
-        }
-    },
-    "data": {
-        "person": {
-            "lastName": "Фамилия",
-            "firstName": "Имя",
-            "middleName": "Отчество",
-            "birthday": {...},
-            "documentType": [...],
-            "documentSeries": "12",
-            "documentNumber": "1231231",
-            "inn": "000000000000",
-            "ogrn": "322440000000311"
-        }
-    }
-}
-```
-
-## 📝 Логирование
-
-Проект использует три типа логгеров:
-
-1. **Основной логгер** (`setup_logger`) - логирует все операции
-2. **Логгер успешных операций** (`setup_success_logger`) - только успешные миграции
-3. **Логгер ошибок** (`setup_fail_logger`) - только ошибки
-4. **Логгер отката** (`setup_rollback_logger`) - операции удаления
-
-Пример использования:
-```python
-from _logger import setup_logger
-
-logger = setup_logger()
-logger.info("Начало миграции")
-logger.error("Произошла ошибка")
-logger.debug("Отладочная информация")
-```
-
-## 🔧 Вспомогательные функции
-
-### Конвертация в JSON-сериализуемый формат
-
-```python
-from _utils import jsonable
-
-# Преобразует numpy типы, pandas Timestamp и т.д.
-data = jsonable(complex_object)
-json_str = json.dumps(data)
-```
-
-### Поиск файлов
-
-```python
-from _utils import find_file_in_dir
-
-# Поиск файла в директории
-file_path = find_file_in_dir(
-    files_dir="/path/to/files",
-    filename_hint="document"  # с расширением или без
-)
-```
-
-### Работа с base64
-
-```python
-from _utils import read_file_as_base64
-
-# Чтение файла в base64
-b64_content = read_file_as_base64("/path/to/file.pdf")
-```
-
-## 🌐 API Endpoints
-
-Основные используемые endpoints:
-
-- `POST /api/v1/search/subservices` - поиск под услуг
-- `POST /api/v1/search/organizations` - поиск организаций
-- `POST /api/v1/create/{collection}` - создание записи
-- `PUT /api/v1/update/{collection}` - обновление записи
-- `DELETE /api/v1/delete/{collection}` - удаление записи
-- `POST /api/v1/storage/upload` - загрузка файла
-- `DELETE /api/v1/storage/remove` - удаление файла
-
-## ⚠️ Важные замечания
-
-1. **SSL Verification**: Отключена (`session.verify = False`) для работы с dev-сервером
-2. **Повторные попытки**: API запросы автоматически повторяются при ошибках 401, 403, 500
-3. **Кодировка**: Все логи сохраняются в UTF-8
-4. **Временная зона**: Даты конвертируются в UTC+3 (московское время)
-
-## 📄 Лицензия
-
-Внутренний инструмент для миграции данных.
-
-## 👥 Поддержка
-
-По вопросам обращайтесь к разработчикам проекта.
+- `logs/script_creation_log-*.txt` — технический лог
+- `logs/user_log-*.txt` — лог для оператора
+- `logs/success_log-*.txt` — успешно созданные записи
+- `logs/fail_log-*.txt` — ошибки строк
+- `logs/script_rollback_log-*.txt` — лог отката

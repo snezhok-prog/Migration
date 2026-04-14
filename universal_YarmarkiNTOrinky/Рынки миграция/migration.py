@@ -1,65 +1,78 @@
-﻿import argparse
-import os
-import sys
-import warnings
-import json
+﻿from __future__ import annotations
+
+import argparse
 import copy
-import requests
+import json
+import os
 import re
 import traceback
-
+import warnings
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+import requests
 from urllib3.exceptions import InsecureRequestWarning
 
-from _config import (
-    SCRIPT_DIR,
-    FILES_DIR,
-    EXCEL_FILE_NAME,
-    BASE_URL,
-    LICENSES_COLLECTION,
-    RECORDS_COLLECTION,
-    STANDARD_CODES,
-    UNIT,
-    TEST,
-    EXCEL_LISTS,
-    RECORDS_TEMPLATES,
-    RESUME_BY_DEFAULT,
-    STATE_FILE,
-)
-from _logger import setup_logger, setup_success_logger, setup_fail_logger, setup_user_logger
-from _state import ResumeState
-from _utils import (
-    nz,
-    split_sc,
-    read_excel,
-    to_iso_date,
-    parse_date_to_birthday_obj,
-    format_phone,
-    format_multiple_phones,
-    read_file_as_base64,
-    find_file_in_dir,
-    find_document_group_by_mnemonic,
-    generate_guid,
-    jsonable
-)
 from _api import (
     api_request,
-    upload_file,
+    create_appeal_data,
+    create_appeal_with_entities,
+    create_mainElement_data,
+    create_subject_data,
+    create_subservice_data,
     delete_file_from_storage,
-    setup_session,
+    delete_from_collection,
+    get_runtime_base_url,
+    get_runtime_ui_base_url,
+    get_standard_code,
     get_subservices,
     get_unit,
-    get_standard_code,
-    create_appeal_data,
-    create_mainElement_data,
-    create_subservice_data,
-    create_subject_data,
-    create_appeal_with_entities,
-    delete_from_collection
+    set_runtime_urls,
+    setup_session,
+    upload_file,
 )
-from _templates import SUBJECT_UL, SUBJECT_IP
+from _config import (
+    BASE_URL,
+    EXCEL_FILE_NAME,
+    EXCEL_INPUT_GLOB,
+    EXCEL_LISTS,
+    FILES_DIR,
+    JWT_URL,
+    LICENSES_COLLECTION,
+    RECORDS_COLLECTION,
+    RECORDS_TEMPLATES,
+    RESUME_BY_DEFAULT,
+    SCRIPT_DIR,
+    STANDARD_CODES,
+    STATE_FILE,
+    TEST,
+    UI_BASE_URL,
+    UNIT,
+)
+from _excel_input import discover_excel_files
+from _logger import setup_fail_logger, setup_logger, setup_success_logger, setup_user_logger
+from _profiles import PROFILES
+from _state import ResumeState
+from _templates import SUBJECT_IP, SUBJECT_UL
+from _utils import (
+    find_document_group_by_mnemonic,
+    find_file_in_dir,
+    format_multiple_phones,
+    format_phone,
+    generate_guid,
+    jsonable,
+    nz,
+    parse_date_to_birthday_obj,
+    parse_key_value_mapping,
+    parse_path_list,
+    read_excel,
+    read_file_as_base64,
+    split_sc,
+    to_iso_date,
+)
 
 NSI_LOCAL_OBJECT_MARKET_COLLECTION = "nsiLocalObjectMarket"
 
@@ -74,7 +87,7 @@ def split_postal_address(s):
     if not raw:
         return {"postalCode": None, "fullAddress": None}
 
-    # "236006, РљР°Р»РёРЅРёРЅРіСЂР°Рґ ..." -> postalCode=236006, fullAddress="РљР°Р»РёРЅРёРЅРіСЂР°Рґ ..."
+    # "236006, Калининград ..." -> postalCode=236006, fullAddress="Калининград ..."
     m = re.match(r"^(\d{6})(?:,\s*)?(.*)$", raw)
     if not m:
         return {"postalCode": None, "fullAddress": raw}
@@ -120,9 +133,9 @@ def collect_non_empty_values(row, column_names):
     return values
 
 def build_nsi_local_object_market_payload(row, unit, guid):
-    market_specialization = normStr(row.get("РЎРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЂС‹РЅРєР°"))
-    market_other_specialization = normStr(row.get("РРЅР°СЏ СЃРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЂС‹РЅРєР°"))
-    if norm_key(market_specialization) == "РёРЅР°СЏ":
+    market_specialization = normStr(row.get("Специализация рынка"))
+    market_other_specialization = normStr(row.get("Иная специализация рынка"))
+    if norm_key(market_specialization) == "иная":
         market_specialization_value = market_other_specialization or market_specialization
     else:
         market_specialization_value = market_specialization or market_other_specialization
@@ -130,17 +143,17 @@ def build_nsi_local_object_market_payload(row, unit, guid):
     full_address = "; ".join(collect_non_empty_values(
         row,
         [
-            "1. РњРµСЃС‚РѕРїРѕР»РѕР¶РµРЅРёРµ РѕР±СЉРµРєС‚Р° РёР»Рё РѕР±СЉРµРєС‚РѕРІ РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё, РіРґРµ РїСЂРµРґРїРѕР»Р°РіР°РµС‚СЃСЏ РѕСЂРіР°РЅРёР·РѕРІР°С‚СЊ СЂС‹РЅРѕРє",
-            "2. РњРµСЃС‚РѕРїРѕР»РѕР¶РµРЅРёРµ РѕР±СЉРµРєС‚Р° РёР»Рё РѕР±СЉРµРєС‚РѕРІ РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё, РіРґРµ РїСЂРµРґРїРѕР»Р°РіР°РµС‚СЃСЏ РѕСЂРіР°РЅРёР·РѕРІР°С‚СЊ СЂС‹РЅРѕРє",
-            "3. РњРµСЃС‚РѕРїРѕР»РѕР¶РµРЅРёРµ РѕР±СЉРµРєС‚Р° РёР»Рё РѕР±СЉРµРєС‚РѕРІ РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё, РіРґРµ РїСЂРµРґРїРѕР»Р°РіР°РµС‚СЃСЏ РѕСЂРіР°РЅРёР·РѕРІР°С‚СЊ СЂС‹РЅРѕРє"
+            "1. Местоположение объекта или объектов недвижимости, где предполагается организовать рынок",
+            "2. Местоположение объекта или объектов недвижимости, где предполагается организовать рынок",
+            "3. Местоположение объекта или объектов недвижимости, где предполагается организовать рынок"
         ]
     ))
     cad_number = "; ".join(collect_non_empty_values(
         row,
         [
-            "1. РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё",
-            "2. РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё",
-            "3. РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё"
+            "1. Кадастровый номер объекта недвижимости",
+            "2. Кадастровый номер объекта недвижимости",
+            "3. Кадастровый номер объекта недвижимости"
         ]
     ))
 
@@ -155,28 +168,28 @@ def build_nsi_local_object_market_payload(row, unit, guid):
         "ObjectID": dash_str(guid),
         "parentEntries": NSI_LOCAL_OBJECT_MARKET_COLLECTION,
         "LayerId": "2",
-        "Layer": "Р РѕР·РЅРёС‡РЅС‹Рµ СЂС‹РЅРєРё",
-        "Subject": dash_str(row.get("РЎСѓР±СЉРµРєС‚ Р Р¤")),
-        "Disctrict": dash_str(row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ")),
+        "Layer": "Розничные рынки",
+        "Subject": dash_str(row.get("Субъект РФ")),
+        "Disctrict": dash_str(row.get("Муниципальный район/округ, городской округ или внутригородская территория")),
         "FullAddress": dash_str(full_address),
-        "GeoCoordinates": dash_str(row.get("Р“РµРѕРєРѕРѕСЂРґРёРЅР°С‚С‹ С‚РѕС‡РєРё, РЅР° РєРѕС‚РѕСЂРѕР№ СЂР°СЃРїРѕР»РѕР¶РµРЅ СЂС‹РЅРѕРє")),
+        "GeoCoordinates": dash_str(row.get("Геокоординаты точки, на которой расположен рынок")),
         "CadNumber": dash_str(cad_number),
-        "PermissionNumber": dash_str(row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-        "PermissionStartDate": dash_str(format_date_to_dmy(row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ"))),
-        "PermissionEndDate": dash_str(format_date_to_dmy(row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ"))),
-        "PermissionStatus": dash_str(row.get("РЎС‚Р°С‚СѓСЃ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-        "TitleMarket": dash_str(row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ СЂС‹РЅРєР°")),
-        "TypeMarket": dash_str(row.get("РўРёРї СЂС‹РЅРєР°")),
+        "PermissionNumber": dash_str(row.get("Номер разрешения")),
+        "PermissionStartDate": dash_str(format_date_to_dmy(row.get("Дата выдачи разрешения"))),
+        "PermissionEndDate": dash_str(format_date_to_dmy(row.get("Дата завершения действия разрешения"))),
+        "PermissionStatus": dash_str(row.get("Статус разрешения")),
+        "TitleMarket": dash_str(row.get("Наименование рынка")),
+        "TypeMarket": dash_str(row.get("Тип рынка")),
         "MarketSpecialization": dash_str(market_specialization_value),
-        "OperatingPeriod": dash_str(row.get("РџРµСЂРёРѕРґ С„СѓРЅРєС†РёРѕРЅРёСЂРѕРІР°РЅРёСЏ СЂС‹РЅРєР°")),
-        "StartTimeMarket": dash_str(row.get("РћСЃРЅРѕРІРЅРѕРµ РІСЂРµРјСЏ РЅР°С‡Р°Р»Р° СЂР°Р±РѕС‚С‹ СЂС‹РЅРєР°")),
-        "EndTimeMarket": dash_str(row.get("РћСЃРЅРѕРІРЅРѕРµ РІСЂРµРјСЏ РѕРєРѕРЅС‡Р°РЅРёСЏ СЂР°Р±РѕС‚С‹ СЂС‹РЅРєР°")),
-        "PlaceNumber": dash_str(row.get("Р§РёСЃР»Рѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚, С€С‚.")),
-        "OperatorName": dash_str(row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ РѕРїРµСЂР°С‚РѕСЂР°")),
-        "OperatorINN": dash_str(row.get("РРќРќ РѕРїРµСЂР°С‚РѕСЂР°")),
-        "OperatorOGRN": dash_str(row.get("РћР“Р Рќ РѕРїРµСЂР°С‚РѕСЂР°")),
-        "OperatorNumber": dash_str(row.get("РљРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ РѕРїРµСЂР°С‚РѕСЂР°")),
-        "OperatorEmail": dash_str(row.get("РђРґСЂРµСЃ СЌР»РµРєС‚СЂРѕРЅРЅРѕР№ РїРѕС‡С‚С‹ РѕРїРµСЂР°С‚РѕСЂР°")),
+        "OperatingPeriod": dash_str(row.get("Период функционирования рынка")),
+        "StartTimeMarket": dash_str(row.get("Основное время начала работы рынка")),
+        "EndTimeMarket": dash_str(row.get("Основное время окончания работы рынка")),
+        "PlaceNumber": dash_str(row.get("Число торговых мест, шт.")),
+        "OperatorName": dash_str(row.get("Наименование оператора")),
+        "OperatorINN": dash_str(row.get("ИНН оператора")),
+        "OperatorOGRN": dash_str(row.get("ОГРН оператора")),
+        "OperatorNumber": dash_str(row.get("Контактный номер оператора")),
+        "OperatorEmail": dash_str(row.get("Адрес электронной почты оператора")),
         "dictionaryType": "local",
         "dictionaryUnitId": dash_str(unit_id)
     }
@@ -185,46 +198,392 @@ def log_success(success_logger, record):
     success_logger.info(json.dumps(record, ensure_ascii=False))
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Markets migration runner")
-    parser.add_argument("--workbook", default=os.path.join(SCRIPT_DIR, EXCEL_FILE_NAME), help="Path to XLSM workbook")
-    parser.add_argument("--files-dir", default=FILES_DIR, help="Directory with attachment files")
-    parser.add_argument("--sheet", choices=["all", "permits", "markets"], default="all", help="Sheets to process")
-    parser.add_argument("--limit", type=int, default=0, help="Max rows per sheet (0 = no limit)")
-    parser.add_argument("--no-auth", action="store_true", help="Skip API authentication")
-    parser.add_argument("--no-prompt", action="store_true", help="Do not ask for cookie/token in console")
-    parser.add_argument("--no-interactive", action="store_true", help="Disable interactive prompts")
-    parser.add_argument("--state-file", default=str(STATE_FILE), help="Path to checkpoints JSON")
-    parser.add_argument("--reset-state", action="store_true", help="Clear checkpoints before run")
-    parser.add_argument("--resume", dest="resume", action="store_true", default=RESUME_BY_DEFAULT, help="Resume from checkpoints")
-    parser.add_argument("--no-resume", dest="resume", action="store_false", help="Ignore checkpoints")
-    return parser.parse_args()
+@dataclass
+class WorkbookRunSpec:
+    workbook_path: str
+    files_dir: str
 
 
-def _prompt_with_default(label, default_value, interactive):
+def _console_block(title: str, lines: Optional[List[str]] = None, width: int = 92) -> str:
+    safe_title = str(title or "").strip() or "Блок"
+    content = ["", "=" * width, safe_title, "-" * width]
+    for line in (lines or []):
+        content.append(str(line))
+    content.append("=" * width)
+    return "\n".join(content)
+
+
+def _format_iso_for_console(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return text
+
+
+def _prompt_with_default(label: str, default_value: str, interactive: bool) -> str:
     if not interactive:
         return default_value
     entered = input(f"{label} [{default_value}]: ").strip().strip('"').strip("'")
     return entered or default_value
 
 
-def _ask_yes_no(prompt, default_yes=True):
+def _ask_yes_no(prompt: str, default_yes: bool = True) -> bool:
     suffix = " [Y/n]: " if default_yes else " [y/N]: "
     answer = input(prompt + suffix).strip().lower()
     if not answer:
         return default_yes
-    return answer in {"y", "yes"}
+    return answer in {"y", "yes", "д", "да"}
 
 
-def _selected_lists(sheet_mode):
+def _ask_error_action() -> str:
+    print("Ошибка строки. Действие: [r]etry / [s]kip / [a]bort")
+    while True:
+        answer = input("Выбор: ").strip().lower()
+        if answer in {"r", "retry"}:
+            return "retry"
+        if answer in {"s", "skip"}:
+            return "skip"
+        if answer in {"a", "abort", "stop"}:
+            return "abort"
+        if not answer:
+            return "abort"
+        print("Введите r, s или a")
+
+
+def _operator_action_on_row_error(*, operator_mode: bool, interactive: bool, logger, context: str) -> str:
+    if not (operator_mode and interactive):
+        return "skip"
+    logger.warning("Ошибка обработки строки: %s", context)
+    action = _ask_error_action()
+    if action == "retry":
+        logger.warning("Retry для данного типа ошибки не поддержан, строка будет пропущена")
+    return action
+
+
+def _selected_lists(sheet_mode: str) -> List[str]:
     mapping = {
-        "permits": "2. Р РµРµСЃС‚СЂ СЂР°Р·СЂРµС€РµРЅРёР№",
-        "markets": "3. Р РµРµСЃС‚СЂ СЂС‹РЅРєРѕРІ",
+        "permits": "2. Реестр разрешений",
+        "markets": "3. Реестр рынков",
     }
     if sheet_mode == "all":
         return list(EXCEL_LISTS)
     selected = mapping.get(sheet_mode)
     return [selected] if selected else list(EXCEL_LISTS)
+
+
+def _numeric_hints(text: str) -> List[str]:
+    normalized = (" " + str(text or "").strip().lower() + " ")
+    hints = set()
+    for token in normalized.split():
+        if token.isdigit():
+            hints.add(token)
+    word_map = {
+        " one ": "1",
+        " first ": "1",
+        " two ": "2",
+        " second ": "2",
+        " three ": "3",
+        " third ": "3",
+        " один ": "1",
+        " первый ": "1",
+        " первая ": "1",
+        " два ": "2",
+        " второй ": "2",
+        " вторая ": "2",
+        " три ": "3",
+        " третий ": "3",
+        " третья ": "3",
+    }
+    for needle, number in word_map.items():
+        if needle in normalized:
+            hints.add(number)
+    return sorted(hints)
+
+
+def _choose_single_workbook(candidates: List[str], interactive: bool) -> Optional[str]:
+    if not candidates:
+        return None
+    if len(candidates) == 1 or not interactive:
+        return candidates[0]
+    print("\nДоступные книги для миграции:")
+    for idx, wb in enumerate(candidates, start=1):
+        print(f"  {idx}) {wb}")
+    raw = input("Выберите номер книги [1]: ").strip()
+    if not raw:
+        return candidates[0]
+    try:
+        selected = int(raw)
+    except Exception:
+        return candidates[0]
+    if 1 <= selected <= len(candidates):
+        return candidates[selected - 1]
+    return candidates[0]
+
+
+def _choose_mass_workbooks(candidates: List[str], interactive: bool) -> List[str]:
+    if not candidates:
+        return []
+    if not interactive:
+        return list(candidates)
+    print("\nДоступные книги для миграции:")
+    for idx, wb in enumerate(candidates, start=1):
+        print(f"  {idx}) {wb}")
+    raw = input("Введите номера книг через запятую или Enter для всех: ").strip()
+    if not raw:
+        return list(candidates)
+    selected: List[str] = []
+    for part in raw.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        try:
+            idx = int(token)
+        except Exception:
+            continue
+        if 1 <= idx <= len(candidates):
+            selected.append(candidates[idx - 1])
+    return selected or list(candidates)
+
+
+def _resolve_mode(mode: str, candidates: List[str], interactive: bool) -> str:
+    if mode in {"single", "mass"}:
+        return mode
+    if len(candidates) <= 1 or not interactive:
+        return "single"
+    print("\nНайдено несколько книг XLSM.")
+    print("  1) single - выбрать одну книгу")
+    print("  2) mass   - обработать несколько/все")
+    answer = input("Выберите режим [1]: ").strip().lower()
+    if answer in {"2", "mass", "m", "м"}:
+        return "mass"
+    return "single"
+
+
+def _infer_files_dir_for_workbook(
+    *,
+    workbook_path: str,
+    files_root: str,
+    files_map: Dict[str, str],
+    interactive: bool,
+    prompt_always: bool,
+) -> str:
+    workbook_abs = str(Path(workbook_path).resolve())
+    workbook_name = Path(workbook_abs).name
+    workbook_stem = Path(workbook_abs).stem
+    mapped_raw = files_map.get(workbook_abs) or files_map.get(workbook_name) or files_map.get(workbook_stem)
+
+    default_dir = str(Path(files_root).resolve())
+    if mapped_raw:
+        mapped_path = Path(str(mapped_raw).strip())
+        if not mapped_path.is_absolute():
+            mapped_path = (Path(SCRIPT_DIR) / mapped_path).resolve()
+        default_dir = str(mapped_path)
+    else:
+        root = Path(default_dir)
+        if root.exists() and root.is_dir():
+            for hint in _numeric_hints(workbook_name):
+                for folder_name in (
+                    hint,
+                    f"part{hint}",
+                    f"book{hint}",
+                    "one" if hint == "1" else "",
+                    "two" if hint == "2" else "",
+                    "three" if hint == "3" else "",
+                ):
+                    if not folder_name:
+                        continue
+                    candidate = root / folder_name
+                    if candidate.exists() and candidate.is_dir():
+                        default_dir = str(candidate.resolve())
+                        break
+
+    if interactive and (prompt_always or not mapped_raw):
+        chosen = _prompt_with_default(f"Files directory for {workbook_name}", default_dir, True)
+        return str(Path(chosen).expanduser().resolve())
+    return str(Path(default_dir).expanduser().resolve())
+
+
+def _resolve_workbook_specs(args: argparse.Namespace, interactive: bool, logger) -> Tuple[List[WorkbookRunSpec], str]:
+    explicit = parse_path_list(args.workbooks)
+    if not explicit and args.workbook:
+        explicit.append(args.workbook)
+    explicit_raw = ";".join(explicit)
+
+    candidates = discover_excel_files(SCRIPT_DIR, explicit_files=explicit_raw, pattern=EXCEL_INPUT_GLOB)
+    if not candidates:
+        candidates = discover_excel_files(SCRIPT_DIR, explicit_files="", pattern=EXCEL_INPUT_GLOB)
+    if not candidates:
+        raise FileNotFoundError("Книги XLSM не найдены")
+
+    resolved_mode = _resolve_mode(args.mode, candidates, interactive)
+    if resolved_mode == "single":
+        chosen = _choose_single_workbook(candidates, interactive)
+        selected = [chosen] if chosen else []
+    else:
+        selected = _choose_mass_workbooks(candidates, interactive)
+
+    if not selected:
+        raise RuntimeError("Не выбрано ни одной книги для миграции")
+
+    files_root = str(Path(args.files_dir).expanduser().resolve())
+    files_map = parse_key_value_mapping(args.files_map)
+
+    specs: List[WorkbookRunSpec] = []
+    for workbook_path in selected:
+        workbook_abs = str(Path(workbook_path).expanduser().resolve())
+        files_dir = _infer_files_dir_for_workbook(
+            workbook_path=workbook_abs,
+            files_root=files_root,
+            files_map=files_map,
+            interactive=interactive,
+            prompt_always=bool(args.ask_files_always),
+        )
+        specs.append(WorkbookRunSpec(workbook_path=workbook_abs, files_dir=files_dir))
+
+    logger.info("Выбрано книг: %s", len(specs))
+    for idx, spec in enumerate(specs, start=1):
+        logger.info("  %s) workbook=%s | files=%s", idx, spec.workbook_path, spec.files_dir)
+    return specs, resolved_mode
+
+
+def _resolve_runtime(args: argparse.Namespace) -> Tuple[str, str, str, str]:
+    if args.profile == "custom":
+        base_url = (args.base_url or BASE_URL).strip()
+        jwt_url = (args.jwt_url or JWT_URL or (base_url.rstrip("/") + "/jwt/")).strip()
+        ui_base_url = (args.ui_base_url or UI_BASE_URL or base_url).strip()
+    else:
+        profile = PROFILES[args.profile]
+        base_url = (args.base_url or profile.base_url).strip()
+        jwt_url = (args.jwt_url or profile.jwt_url).strip()
+        ui_base_url = (args.ui_base_url or profile.ui_base_url).strip()
+
+    if not base_url:
+        raise ValueError("base_url is empty")
+    if not jwt_url:
+        jwt_url = base_url.rstrip("/") + "/jwt/"
+    if not ui_base_url:
+        ui_base_url = base_url
+    return args.profile, base_url.rstrip("/"), jwt_url, ui_base_url.rstrip("/")
+
+
+def _choose_resume_strategy(*, state: ResumeState, logger, user_logger, interactive: bool) -> str:
+    if not state.enabled:
+        return "continue"
+    rows_count = state.rows_count()
+    if rows_count <= 0:
+        return "continue"
+
+    run_info = state.get_run_info()
+    status = str(run_info.get("status") or "").strip().lower()
+    incomplete_statuses = {"running", "stopped", "aborted", "interrupted", "failed", "error", ""}
+    if status not in incomplete_statuses:
+        return "continue"
+
+    last_checkpoint = run_info.get("lastCheckpoint") if isinstance(run_info.get("lastCheckpoint"), dict) else {}
+    lines = [
+        "Обнаружены незавершенные checkpoints предыдущего запуска.",
+        "",
+        f"Статус прошлого запуска : {status or 'неизвестно (старый формат state)'}",
+        f"Начало запуска          : {_format_iso_for_console(run_info.get('startedAt'))}",
+        f"Конец запуска           : {_format_iso_for_console(run_info.get('finishedAt'))}",
+        f"Профиль / стенд         : {run_info.get('profile') or '-'} / {run_info.get('baseUrl') or '-'}",
+        f"Строк в checkpoint      : {rows_count}",
+        f"Последняя позиция       : {last_checkpoint.get('job') or '-'} / row={last_checkpoint.get('row') or '-'}",
+        f"Последняя запись _id    : {last_checkpoint.get('_id') or '-'}",
+    ]
+    block = _console_block("RESUME: найдено незавершенное состояние", lines)
+    logger.warning("%s", block)
+    if user_logger:
+        user_logger.info(block)
+
+    if not interactive:
+        logger.info("Интерактив выключен, автоматически продолжаем по checkpoint.")
+        return "continue"
+
+    prompt = "\n[RESUME] Выберите: [P]продолжить / [C]сбросить / [Q]выйти: "
+    while True:
+        try:
+            raw = input(prompt)
+        except EOFError:
+            return "continue"
+        choice = normStr(raw).lower()
+        if choice in {"", "p", "продолжить", "continue", "resume"}:
+            return "continue"
+        if choice in {"c", "сбросить", "reset", "сброс", "start"}:
+            return "reset"
+        if choice in {"q", "quit", "выйти", "exit", "abort"}:
+            return "abort"
+
+
+def _log_user_run_header(
+    *,
+    user_logger,
+    profile: str,
+    base_url: str,
+    mode: str,
+    interactive: bool,
+    operator_mode: bool,
+    state_file_path: str,
+    success_log_path: str,
+    fail_log_path: str,
+) -> None:
+    if user_logger is None:
+        return
+    lines = [
+        "",
+        "#" * 92,
+        "===== СТАРТ МИГРАЦИИ РЫНКОВ =====",
+        "-" * 92,
+        f"Профиль         : {profile}",
+        f"Стенд           : {base_url}",
+        f"Режим           : {mode}",
+        f"Интерактивный   : {'да' if interactive else 'нет'}",
+        f"Operator mode   : {'включен' if operator_mode else 'выключен'}",
+        f"checkpoints     : {state_file_path}",
+        f"Лог успехов     : {success_log_path or '-'}",
+        f"Лог ошибок      : {fail_log_path or '-'}",
+        "#" * 92,
+    ]
+    user_logger.info("\n".join(lines))
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Миграция данных реестров рынков")
+    parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="dev")
+    parser.add_argument("--base-url", default="")
+    parser.add_argument("--jwt-url", default="")
+    parser.add_argument("--ui-base-url", default="")
+
+    parser.add_argument("--mode", choices=["auto", "single", "mass"], default="auto")
+    parser.add_argument("--workbook", default=str(Path(SCRIPT_DIR) / EXCEL_FILE_NAME), help="Путь к книге Excel (совместимость)")
+    parser.add_argument("--workbooks", default="", help="Явный список книг (разделитель ';' или новая строка)")
+    parser.add_argument("--files-dir", default=FILES_DIR, help="Папка с файлами для загрузки")
+    parser.add_argument("--files-map", default="", help="Связка книга->папка файлов: 'book1.xlsm=dir1;book2.xlsm=dir2'")
+    parser.add_argument("--ask-files-always", action="store_true", help="Всегда спрашивать папку файлов для каждой книги")
+
+    parser.add_argument("--sheet", choices=["all", "permits", "markets"], default="all", help="Какие листы запускать")
+    parser.add_argument("--limit", type=int, default=0, help="Ограничение по числу строк на лист")
+    parser.add_argument("--auth-only", action="store_true", help="Проверить авторизацию и завершить работу")
+    parser.add_argument("--skip-auth", action="store_true", help="Пропустить авторизацию. Допустимо только с --dry-run")
+    parser.add_argument("--dry-run", action="store_true", help="Только собрать payload без записи в API")
+    parser.add_argument("--no-auth", action="store_true", help=argparse.SUPPRESS)
+
+    parser.add_argument("--operator-mode", action="store_true", help="На ошибке строки: retry/skip/abort")
+    parser.add_argument("--no-prompt", action="store_true", help="Не запрашивать input, использовать значения из файлов")
+    parser.add_argument("--no-interactive", action="store_true", help="Отключить интерактивный режим")
+    parser.add_argument("--state-file", default=str(STATE_FILE), help="Путь к checkpoints JSON")
+    parser.add_argument("--reset-state", action="store_true", help="Очистить checkpoints перед запуском")
+    parser.add_argument("--resume", dest="resume", action="store_true", default=RESUME_BY_DEFAULT, help="Продолжать с checkpoints")
+    parser.add_argument("--no-resume", dest="resume", action="store_false", help="Игнорировать checkpoints")
+    return parser.parse_args()
+
 
 def main():
     args = parse_args()
@@ -236,35 +595,88 @@ def main():
     userLogger = setup_user_logger()
 
     interactive = not args.no_interactive and not args.no_prompt
-    workbook_default = str(Path(args.workbook).expanduser().resolve())
-    files_default = str(Path(args.files_dir).expanduser().resolve())
-    workbook_path = Path(_prompt_with_default("Excel workbook", workbook_default, interactive)).expanduser().resolve()
-    files_dir_active = str(Path(_prompt_with_default("Files directory", files_default, interactive)).expanduser().resolve())
+    try:
+        profile_name, runtime_base_url, runtime_jwt_url, runtime_ui_url = _resolve_runtime(args)
+    except Exception as exc:
+        logger.error("Ошибка runtime конфигурации: %s", exc)
+        return 1
+    set_runtime_urls(base_url=runtime_base_url, jwt_url=runtime_jwt_url, ui_base_url=runtime_ui_url)
+
+    skip_auth = bool(args.skip_auth or args.no_auth)
+    if skip_auth and not args.dry_run:
+        logger.error("--skip-auth can be used only with --dry-run")
+        return 1
+    if args.auth_only and skip_auth:
+        logger.error("--auth-only cannot be used together with --skip-auth")
+        return 1
+
+    try:
+        workbook_specs, resolved_mode = _resolve_workbook_specs(args, interactive, logger)
+    except Exception as exc:
+        logger.error("Ошибка выбора книг/папок: %s", exc)
+        return 1
 
     state_path = Path(args.state_file).expanduser().resolve()
-    state = ResumeState(path=state_path, namespace="markets_migration", enabled=True)
+    state_namespace = f"markets_migration:{profile_name}"
+    state = ResumeState(path=state_path, namespace=state_namespace, enabled=True)
     if args.reset_state:
         state.reset_namespace()
         logger.info("State reset: %s", state_path)
 
     resume_enabled = bool(args.resume)
-    if resume_enabled and state.rows_count() > 0 and interactive:
-        run_info = state.get_run_info()
-        logger.info(
-            "РќР°Р№РґРµРЅС‹ checkpoints: rows=%s status=%s startedAt=%s",
-            state.rows_count(),
-            run_info.get("status"),
-            run_info.get("startedAt"),
-        )
-        if not _ask_yes_no("РџСЂРѕРґРѕР»Р¶РёС‚СЊ СЃ РїСЂРµРґС‹РґСѓС‰РµРіРѕ checkpoints?", default_yes=True):
+    if resume_enabled:
+        strategy = _choose_resume_strategy(state=state, logger=logger, user_logger=userLogger, interactive=interactive)
+        if strategy == "abort":
+            logger.warning("Остановка по выбору оператора перед стартом")
+            return 1
+        if strategy == "reset":
             state.clear_rows()
             resume_enabled = False
+            logger.info("Checkpoints очищены перед стартом")
+
+    logger.info(
+        "%s",
+        _console_block(
+            "Markets migration start",
+            [
+                f"Profile      : {profile_name}",
+                f"Base URL     : {get_runtime_base_url()}",
+                f"UI URL       : {get_runtime_ui_base_url()}",
+                f"Mode         : {resolved_mode}",
+                f"Sheet mode   : {args.sheet}",
+                f"Dry run      : {args.dry_run}",
+                f"Skip auth    : {skip_auth}",
+                f"Resume       : {resume_enabled}",
+                f"State file   : {state_path}",
+                f"Interactive  : {interactive}",
+                f"Operator mode: {args.operator_mode}",
+                f"Workbook(s)  : {len(workbook_specs)}",
+            ],
+        ),
+    )
+    _log_user_run_header(
+        user_logger=userLogger,
+        profile=profile_name,
+        base_url=get_runtime_base_url(),
+        mode=resolved_mode,
+        interactive=interactive,
+        operator_mode=bool(args.operator_mode),
+        state_file_path=str(state_path),
+        success_log_path=getattr(successLogger, "log_path", ""),
+        fail_log_path=getattr(failLogger, "log_path", ""),
+    )
 
     state.begin_run(
-        workbook=str(workbook_path),
-        filesDir=files_dir_active,
+        profile=profile_name,
+        baseUrl=get_runtime_base_url(),
+        uiBaseUrl=get_runtime_ui_base_url(),
+        mode=resolved_mode,
         sheet=args.sheet,
+        dryRun=bool(args.dry_run),
         resume=resume_enabled,
+        operatorMode=bool(args.operator_mode),
+        workbooks=[spec.workbook_path for spec in workbook_specs],
+        filesMap={spec.workbook_path: spec.files_dir for spec in workbook_specs},
     )
 
     stopped = False
@@ -276,403 +688,480 @@ def main():
 
     try:
         session = None
-        if not TEST and not args.no_auth:
+        if not skip_auth:
             session = setup_session(logger, no_prompt=(args.no_prompt or args.no_interactive))
             if session is None:
-                fatal_error = True
-                failed_rows += 1
-                return 1
+                raise RuntimeError("Авторизация не выполнена")
+            logger.info("Авторизация выполнена успешно")
 
-        excel_path = str(workbook_path)
-        logger.info(f"Р§С‚РµРЅРёРµ С„Р°Р№Р»Р°: {excel_path}")
-        userLogger.info(
-            "START | workbook=%s | files=%s | sheet=%s | resume=%s",
-            excel_path,
-            files_dir_active,
-            args.sheet,
-            resume_enabled,
-        )
-        for list_name in _selected_lists(args.sheet):
-            logger.info(f"РћР±СЂР°Р±РѕС‚РєР° Р»РёСЃС‚Р°: {list_name}")
+        if args.auth_only:
+            logger.info("--auth-only: авторизация проверена, миграция не запускается")
+            state.finish_run(
+                status="completed",
+                summary={
+                    "authOnly": True,
+                    "workbooks": len(workbook_specs),
+                    "createdRows": 0,
+                    "processedRows": 0,
+                    "resumeSkips": 0,
+                    "failedRows": 0,
+                },
+                clear_rows=True,
+            )
+            return 0
 
-            excel = read_excel(excel_path, skiprows=3, sheet_name=list_name)
-            if excel is None:
-                logger.error(f"Р¤Р°Р№Р» {excel_path} РЅРµ РЅР°Р№РґРµРЅ")
-                failed_rows += 1
-                raise RuntimeError(f"Excel read failed for sheet: {list_name}")
-            excel = excel.iloc[1:].reset_index(drop=True) # РЈРґР°Р»СЏРµРј СЃС‚СЂРѕРєСѓ СЃ РїРѕРґРїРёСЃСЏРјРё Рё СЃР±СЂР°СЃС‹РІР°РµРј РёРЅРґРµРєСЃ
+        for spec in workbook_specs:
+            workbook_path = Path(spec.workbook_path).expanduser().resolve()
+            files_dir_active = str(Path(spec.files_dir).expanduser().resolve())
+            excel_path = str(workbook_path)
+            if not workbook_path.exists():
+                raise FileNotFoundError(f"Книга не найдена: {workbook_path}")
 
-            logger.info(f"Р—Р°РіСЂСѓР¶РµРЅРѕ СЃС‚СЂРѕРє: {len(excel)}")
-            excel.columns = [c.strip() for c in excel.columns]
-            rows_total = len(excel)
-            for i, row in enumerate(excel.to_dict("records"), start=1):
-                logger.info(f"{i}/{rows_total}")
-                if args.limit and i > int(args.limit):
-                    logger.info("Р”РѕСЃС‚РёРіРЅСѓС‚ Р»РёРјРёС‚ СЃС‚СЂРѕРє (%s) РґР»СЏ Р»РёСЃС‚Р° %s", args.limit, list_name)
-                    break
+            logger.info("%s", _console_block("Workbook", [f"Path: {workbook_path}", f"Files: {files_dir_active}"]))
+            userLogger.info(
+                "WORKBOOK_START | workbook=%s | files=%s | sheet=%s | resume=%s",
+                excel_path,
+                files_dir_active,
+                args.sheet,
+                resume_enabled,
+            )
 
-                if resume_enabled:
-                    checkpoint = state.get(str(workbook_path), list_name, i)
-                    if isinstance(checkpoint, dict):
-                        resumed_skips += 1
-                        logger.info("[RESUME][SKIP] sheet=%s row=%s _id=%s", list_name, i, checkpoint.get("_id"))
-                        continue
+            for list_name in _selected_lists(args.sheet):
+                logger.info("Обработка листа: %s | книга: %s", list_name, workbook_path.name)
 
-                processed_rows += 1
+                excel = read_excel(excel_path, skiprows=3, sheet_name=list_name)
+                if excel is None:
+                    raise RuntimeError(f"Не удалось прочитать лист '{list_name}' из книги {excel_path}")
+                excel = excel.iloc[1:].reset_index(drop=True)  # Удаляем строку с подписями и сбрасываем индекс
 
-                unit = UNIT
+                logger.info("Загружено строк: %s", len(excel))
+                excel.columns = [c.strip() for c in excel.columns]
+                rows_total = len(excel)
+                for i, row in enumerate(excel.to_dict("records"), start=1):
+                    logger.info("%s/%s", i, rows_total)
+                    if args.limit and i > int(args.limit):
+                        logger.info("Достигнут лимит строк (%s) для листа %s", args.limit, list_name)
+                        break
 
-                if TEST:
-                    print(row)
-                MAP_PERMISSION_STATUS = {
-                    "РґРµР№СЃС‚РІСѓРµС‚":      { "code": "Working",     "name": "Р”РµР№СЃС‚РІСѓРµС‚" },
-                    "РїСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ": { "code": "Stop",        "name": "РџСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ" },
-                    "Р°РЅРЅСѓР»РёСЂРѕРІР°РЅРѕ":   { "code": "Annul",       "name": "РђРЅРЅСѓР»РёСЂРѕРІР°РЅРѕ" },
-                    "РЅРµ РґРµР№СЃС‚РІСѓРµС‚":   { "code": "doesNotWork", "name": "РќРµ РґРµР№СЃС‚РІСѓРµС‚" },
-                    "С‡РµСЂРЅРѕРІРёРє":       { "code": "Draft",       "name": "Р§РµСЂРЅРѕРІРёРє" }
-                }
-                MAP_MARKET_TYPE = {
-                    "СЃРїРµС†РёР°Р»РёР·РёСЂРѕРІР°РЅРЅС‹Р№": { "code": "Specialized", "_id": "68ed17bb27eea1af1d5473f7", "name": "РЎРїРµС†РёР°Р»РёР·РёСЂРѕРІР°РЅРЅС‹Р№" },
-                    "СѓРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№":      { "code": "Universal",   "_id": "68ed1979b12469d98995f24e", "name": "РЈРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№" }
-                }
-                MAP_SPECIALIZATION = {
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Р№":                       { "code":"Agricultural", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Р№" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Р№ РєРѕРѕРїРµСЂР°С‚РёРІРЅС‹Р№":        { "code":"AgriculturalCooperative", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Р№ РєРѕРѕРїРµСЂР°С‚РёРІРЅС‹Р№" },
-                    "РІРµС‰РµРІРѕР№":                                   { "code":"Clothing", "parentId":"68ed17bb27eea1af1d5473f7", "name":"Р’РµС‰РµРІРѕР№" },
-                    "РїРѕ РїСЂРѕРґР°Р¶Рµ СЂР°РґРёРѕ- Рё СЌР»РµРєС‚СЂРѕР±С‹С‚РѕРІРѕР№ С‚РµС…РЅРёРєРё": { "code":"For the sale of radio and electrical appliances", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РџРѕ РїСЂРѕРґР°Р¶Рµ СЂР°РґРёРѕ- Рё СЌР»РµРєС‚СЂРѕР±С‹С‚РѕРІРѕР№ С‚РµС…РЅРёРєРё" },
-                    "РёРЅР°СЏ":                                      { "code":"Other", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РРЅР°СЏ" },
-                    "РёРЅРѕРµ":                                      { "code":"Other", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РРЅР°СЏ" },
-                    "РїРѕ РїСЂРѕРґР°Р¶Рµ СЃС‚СЂРѕРёС‚РµР»СЊРЅС‹С… РјР°С‚РµСЂРёР°Р»РѕРІ":         { "code":"SaleBuildingMaterials", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РџРѕ РїСЂРѕРґР°Р¶Рµ СЃС‚СЂРѕРёС‚РµР»СЊРЅС‹С… РјР°С‚РµСЂРёР°Р»РѕРІ" },
-                    "РїРѕ РїСЂРѕРґР°Р¶Рµ РїСЂРѕРґСѓРєС‚РѕРІ РїРёС‚Р°РЅРёСЏ":               { "code":"SaleProducts", "parentId":"68ed17bb27eea1af1d5473f7", "name":"РџРѕ РїСЂРѕРґР°Р¶Рµ РїСЂРѕРґСѓРєС‚РѕРІ РїРёС‚Р°РЅРёСЏ" }
-                }
-                MAP_OPERATION_PERIOD = {
-                    "РїРѕСЃС‚РѕСЏРЅРЅС‹Р№": { "code":"PermanentType", "name":"РџРѕСЃС‚РѕСЏРЅРЅС‹Р№" },
-                    "РІСЂРµРјРµРЅРЅС‹Р№":  { "code":"TemporaryType", "name":"Р’СЂРµРјРµРЅРЅС‹Р№" }
-                }
-                MAP_ORG_STATE_FORM = {
-                    "РЅРµРіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РїРµРЅСЃРёРѕРЅРЅС‹Рµ С„РѕРЅРґС‹": { "code": "70402", "name": "РќРµРіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РїРµРЅСЃРёРѕРЅРЅС‹Рµ С„РѕРЅРґС‹" },
-                    "СЂР°Р№РѕРЅРЅС‹Рµ СЃСѓРґС‹, РіРѕСЂРѕРґСЃРєРёРµ СЃСѓРґС‹, РјРµР¶СЂР°Р№РѕРЅРЅС‹Рµ СЃСѓРґС‹ (СЂР°Р№РѕРЅРЅС‹Рµ СЃСѓРґС‹)": { "code": "30008", "name": "Р Р°Р№РѕРЅРЅС‹Рµ СЃСѓРґС‹, РіРѕСЂРѕРґСЃРєРёРµ СЃСѓРґС‹, РјРµР¶СЂР°Р№РѕРЅРЅС‹Рµ СЃСѓРґС‹ (СЂР°Р№РѕРЅРЅС‹Рµ СЃСѓРґС‹)" },
-                    "С‚РѕРІР°СЂРёС‰РµСЃС‚РІР° СЃРѕР±СЃС‚РІРµРЅРЅРёРєРѕРІ РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё": { "code": "20700", "name": "РўРѕРІР°СЂРёС‰РµСЃС‚РІР° СЃРѕР±СЃС‚РІРµРЅРЅРёРєРѕРІ РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё" },
-                    "РѕР±РѕСЃРѕР±Р»РµРЅРЅС‹Рµ РїРѕРґСЂР°Р·РґРµР»РµРЅРёСЏ СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†": { "code": "30003", "name": "РћР±РѕСЃРѕР±Р»РµРЅРЅС‹Рµ РїРѕРґСЂР°Р·РґРµР»РµРЅРёСЏ СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†" },
-                    "Р°РґРІРѕРєР°С‚С‹, СѓС‡СЂРµРґРёРІС€РёРµ Р°РґРІРѕРєР°С‚СЃРєРёР№ РєР°Р±РёРЅРµС‚": { "code": "50201", "name": "РђРґРІРѕРєР°С‚С‹, СѓС‡СЂРµРґРёРІС€РёРµ Р°РґРІРѕРєР°С‚СЃРєРёР№ РєР°Р±РёРЅРµС‚" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ Р¶РёРІРѕС‚РЅРѕРІРѕРґС‡РµСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20115", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ Р¶РёРІРѕС‚РЅРѕРІРѕРґС‡РµСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "СЃР°РґРѕРІРѕРґС‡РµСЃРєРёРµ РёР»Рё РѕРіРѕСЂРѕРґРЅРёС‡РµСЃРєРёРµ РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёРµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°": { "code": "20702", "name": "РЎР°РґРѕРІРѕРґС‡РµСЃРєРёРµ РёР»Рё РѕРіРѕСЂРѕРґРЅРёС‡РµСЃРєРёРµ РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёРµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°" },
-                    "Р¶РёР»РёС‰РЅС‹Рµ РёР»Рё Р¶РёР»РёС‰РЅРѕ-СЃС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20102", "name": "Р–РёР»РёС‰РЅС‹Рµ РёР»Рё Р¶РёР»РёС‰РЅРѕ-СЃС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "РєР°Р·Р°С‡СЊРё РѕР±С‰РµСЃС‚РІР°, РІРЅРµСЃРµРЅРЅС‹Рµ РІ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Р№ СЂРµРµСЃС‚СЂ РєР°Р·Р°С‡СЊРёС… РѕР±С‰РµСЃС‚РІ РІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "21100", "name": "РљР°Р·Р°С‡СЊРё РѕР±С‰РµСЃС‚РІР°, РІРЅРµСЃРµРЅРЅС‹Рµ РІ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Р№ СЂРµРµСЃС‚СЂ РєР°Р·Р°С‡СЊРёС… РѕР±С‰РµСЃС‚РІ РІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "14100", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "РЅРѕС‚Р°СЂРёСѓСЃС‹, Р·Р°РЅРёРјР°СЋС‰РёРµСЃСЏ С‡Р°СЃС‚РЅРѕР№ РїСЂР°РєС‚РёРєРѕР№": { "code": "50202", "name": "РќРѕС‚Р°СЂРёСѓСЃС‹, Р·Р°РЅРёРјР°СЋС‰РёРµСЃСЏ С‡Р°СЃС‚РЅРѕР№ РїСЂР°РєС‚РёРєРѕР№" },
-                    "РєСЂРµСЃС‚СЊСЏРЅСЃРєРёРµ (С„РµСЂРјРµСЂСЃРєРёРµ) С…РѕР·СЏР№СЃС‚РІР°": { "code": "15300", "name": "РљСЂРµСЃС‚СЊСЏРЅСЃРєРёРµ (С„РµСЂРјРµСЂСЃРєРёРµ) С…РѕР·СЏР№СЃС‚РІР°" },
-                    "Р±Р»Р°РіРѕС‚РІРѕСЂРёС‚РµР»СЊРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75502", "name": "Р‘Р»Р°РіРѕС‚РІРѕСЂРёС‚РµР»СЊРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "РїСЂРѕС‡РёРµ СЋСЂРёРґРёС‡РµСЃРєРёРµ Р»РёС†Р°, СЏРІР»СЏСЋС‰РёРµСЃСЏ РєРѕРјРјРµСЂС‡РµСЃРєРёРјРё РѕСЂРіР°РЅРёР·Р°С†РёСЏРјРё": { "code": "19000", "name": "РџСЂРѕС‡РёРµ СЋСЂРёРґРёС‡РµСЃРєРёРµ Р»РёС†Р°, СЏРІР»СЏСЋС‰РёРµСЃСЏ РєРѕРјРјРµСЂС‡РµСЃРєРёРјРё РѕСЂРіР°РЅРёР·Р°С†РёСЏРјРё" },
-                    "РѕР±СЉРµРґРёРЅРµРЅРёСЏ С„РµСЂРјРµСЂСЃРєРёС… С…РѕР·СЏР№СЃС‚РІ": { "code": "20613", "name": "РћР±СЉРµРґРёРЅРµРЅРёСЏ С„РµСЂРјРµСЂСЃРєРёС… С…РѕР·СЏР№СЃС‚РІ" },
-                    "РЅРѕС‚Р°СЂРёР°Р»СЊРЅС‹Рµ РїР°Р»Р°С‚С‹": { "code": "20610", "name": "РќРѕС‚Р°СЂРёР°Р»СЊРЅС‹Рµ РїР°Р»Р°С‚С‹" },
-                    "РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёРµ РїР°СЂС‚РЅРµСЂСЃС‚РІР°": { "code": "20614", "name": "РќРµРєРѕРјРјРµСЂС‡РµСЃРєРёРµ РїР°СЂС‚РЅРµСЂСЃС‚РІР°" },
-                    "РѕР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ С„РѕРЅРґС‹": { "code": "70403", "name": "РћР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ С„РѕРЅРґС‹" },
-                    "С„РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р°РІС‚РѕРЅРѕРјРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75101", "name": "Р¤РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р°РІС‚РѕРЅРѕРјРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РѕР±СЃР»СѓР¶РёРІР°СЋС‰РёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20111", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РѕР±СЃР»СѓР¶РёРІР°СЋС‰РёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "РѕР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё": { "code": "20200", "name": "РћР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ  РѕСЂРіР°РЅРёР·Р°С†РёРё" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєРѕСЂРїРѕСЂР°С†РёРё": { "code": "71601", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєРѕСЂРїРѕСЂР°С†РёРё" },
-                    "РіР»Р°РІС‹ РєСЂРµСЃС‚СЊСЏРЅСЃРєРёС… (С„РµСЂРјРµСЂСЃРєРёС…) С…РѕР·СЏР№СЃС‚РІ": { "code": "50101", "name": "Р“Р»Р°РІС‹ РєСЂРµСЃС‚СЊСЏРЅСЃРєРёС… (С„РµСЂРјРµСЂСЃРєРёС…) С…РѕР·СЏР№СЃС‚РІ" },
-                    "Р°РІС‚РѕРЅРѕРјРЅС‹Рµ РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёРµ РѕСЂРіР°РЅРёР·Р°С†РёРё": { "code": "71400", "name": "РђРІС‚РѕРЅРѕРјРЅС‹Рµ РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёРµ РѕСЂРіР°РЅРёР·Р°С†РёРё" },
-                    "СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75000", "name": "РЈС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р°РІС‚РѕРЅРѕРјРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ СЃСѓР±СЉРµРєС‚РѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "75201", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р°РІС‚РѕРЅРѕРјРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ СЃСѓР±СЉРµРєС‚РѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "РѕР±СЉРµРґРёРЅРµРЅРёСЏ (Р°СЃСЃРѕС†РёР°С†РёРё Рё СЃРѕСЋР·С‹) Р±Р»Р°РіРѕС‚РІРѕСЂРёС‚РµР»СЊРЅС‹С… РѕСЂРіР°РЅРёР·Р°С†РёР№": { "code": "20620", "name": "РћР±СЉРµРґРёРЅРµРЅРёСЏ (Р°СЃСЃРѕС†РёР°С†РёРё Рё СЃРѕСЋР·С‹) Р±Р»Р°РіРѕС‚РІРѕСЂРёС‚РµР»СЊРЅС‹С… РѕСЂРіР°РЅРёР·Р°С†РёР№" },
-                    "РїСѓР±Р»РёС‡РЅС‹Рµ Р°РєС†РёРѕРЅРµСЂРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°": { "code": "12247", "name": "РџСѓР±Р»РёС‡РЅС‹Рµ Р°РєС†РёРѕРЅРµСЂРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р°РєР°РґРµРјРёРё РЅР°СѓРє": { "code": "75300", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р°РєР°РґРµРјРёРё РЅР°СѓРє" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєРѕРјРїР°РЅРёРё": { "code": "71602", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєРѕРјРїР°РЅРёРё" },
-                    "РїСЂРµРґСЃС‚Р°РІРёС‚РµР»СЊСЃС‚РІР° СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†": { "code": "30001", "name": "РџСЂРµРґСЃС‚Р°РІРёС‚РµР»СЊСЃС‚РІР° СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р±СЋРґР¶РµС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ СЃСѓР±СЉРµРєС‚РѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "75203", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р±СЋРґР¶РµС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ СЃСѓР±СЉРµРєС‚РѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "СЃРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РєСЂРµРґРёС‚РЅС‹С… РєРѕРѕРїРµСЂР°С‚РёРІРѕРІ": { "code": "20604", "name": "РЎРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РєСЂРµРґРёС‚РЅС‹С… РєРѕРѕРїРµСЂР°С‚РёРІРѕРІ" },
-                    "РјРµР¶РїСЂР°РІРёС‚РµР»СЊСЃС‚РІРµРЅРЅС‹Рµ РјРµР¶РґСѓРЅР°СЂРѕРґРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё": { "code": "40001", "name": "РњРµР¶РїСЂР°РІРёС‚РµР»СЊСЃС‚РІРµРЅРЅС‹Рµ РјРµР¶РґСѓРЅР°СЂРѕРґРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё" },
-                    "РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ Р±СЋРґР¶РµС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75403", "name": "РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ Р±СЋРґР¶РµС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ СѓРЅРёС‚Р°СЂРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ СЃСѓР±СЉРµРєС‚РѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "65242", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ СѓРЅРёС‚Р°СЂРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ СЃСѓР±СЉРµРєС‚РѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "РїРѕР»РЅС‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°": { "code": "11051", "name": "РџРѕР»РЅС‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°" },
-                    "РѕР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ РґРІРёР¶РµРЅРёСЏ": { "code": "20210", "name": "РћР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ РґРІРёР¶РµРЅРёСЏ" },
-                    "СЂС‹Р±РѕР»РѕРІРµС†РєРёРµ Р°СЂС‚РµР»Рё (РєРѕР»С…РѕР·С‹)": { "code": "14154", "name": "Р С‹Р±РѕР»РѕРІРµС†РєРёРµ Р°СЂС‚РµР»Рё (РєРѕР»С…РѕР·С‹)" },
-                    "РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РѕР±С‰РµСЃС‚РІР°": { "code": "20107", "name": "РџРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РѕР±С‰РµСЃС‚РІР°" },
-                    "СЃРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РѕР±С‰РёРЅ РјР°Р»РѕС‡РёСЃР»РµРЅРЅС‹С… РЅР°СЂРѕРґРѕРІ": { "code": "20607", "name": "РЎРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РѕР±С‰РёРЅ РјР°Р»РѕС‡РёСЃР»РµРЅРЅС‹С… РЅР°СЂРѕРґРѕРІ" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РїРµСЂРµСЂР°Р±Р°С‚С‹РІР°СЋС‰РёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20109", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РїРµСЂРµСЂР°Р±Р°С‚С‹РІР°СЋС‰РёРµ  РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "СѓС‡СЂРµР¶РґРµРЅРёСЏ, СЃРѕР·РґР°РЅРЅС‹Рµ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРµР№": { "code": "75100", "name": "РЈС‡СЂРµР¶РґРµРЅРёСЏ, СЃРѕР·РґР°РЅРЅС‹Рµ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРµР№" },
-                    "РїСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹ (РєСЂРѕРјРµ СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹С… РїСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹С… РєРѕРѕРїРµСЂР°С‚РёРІРѕРІ)": { "code": "14200", "name": "РџСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹ (РєСЂРѕРјРµ СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹С… РїСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹С… РєРѕРѕРїРµСЂР°С‚РёРІРѕРІ)" },
-                    "СѓС‡СЂРµР¶РґРµРЅРёСЏ, СЃРѕР·РґР°РЅРЅС‹Рµ СЃСѓР±СЉРµРєС‚РѕРј СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "75200", "name": "РЈС‡СЂРµР¶РґРµРЅРёСЏ, СЃРѕР·РґР°РЅРЅС‹Рµ СЃСѓР±СЉРµРєС‚РѕРј Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ СЃСѓР±СЉРµРєС‚РѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "75204", "name": "Р“РѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ СЃСѓР±СЉРµРєС‚РѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "С„РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ СѓРЅРёС‚Р°СЂРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ": { "code": "65241", "name": "Р¤РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ СѓРЅРёС‚Р°СЂРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ" },
-                    "СЃР°РјРѕСЂРµРіСѓР»РёСЂСѓРµРјС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё": { "code": "20619", "name": "РЎР°РјРѕСЂРµРіСѓР»РёСЂСѓРµРјС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё" },
-                    "С‚РµСЂСЂРёС‚РѕСЂРёР°Р»СЊРЅС‹Рµ РѕР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ СЃР°РјРѕСѓРїСЂР°РІР»РµРЅРёСЏ": { "code": "20217", "name": "РўРµСЂСЂРёС‚РѕСЂРёР°Р»СЊРЅС‹Рµ РѕР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ СЃР°РјРѕСѓРїСЂР°РІР»РµРЅРёСЏ" },
-                    "Р°РєС†РёРѕРЅРµСЂРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°": { "code": "12200", "name": "РђРєС†РёРѕРЅРµСЂРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°" },
-                    "РєСЂРµРґРёС‚РЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹ РіСЂР°Р¶РґР°РЅ": { "code": "20105", "name": "РљСЂРµРґРёС‚РЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ  РєРѕРѕРїРµСЂР°С‚РёРІС‹ РіСЂР°Р¶РґР°РЅ" },
-                    "РєР°Р·РµРЅРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ СЃСѓР±СЉРµРєС‚РѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "65142", "name": "РљР°Р·РµРЅРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ СЃСѓР±СЉРµРєС‚РѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "СЃРѕРІРµС‚С‹ РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹С… РѕР±СЂР°Р·РѕРІР°РЅРёР№ СЃСѓР±СЉРµРєС‚РѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "20603", "name": "РЎРѕРІРµС‚С‹ РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹С… РѕР±СЂР°Р·РѕРІР°РЅРёР№ СЃСѓР±СЉРµРєС‚РѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ СЃРЅР°Р±Р¶РµРЅС‡РµСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20112", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ СЃРЅР°Р±Р¶РµРЅС‡РµСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "Р°СЃСЃРѕС†РёР°С†РёРё (СЃРѕСЋР·С‹)": { "code": "20600", "name": "РђСЃСЃРѕС†РёР°С†РёРё (СЃРѕСЋР·С‹)" },
-                    "С„РёР»РёР°Р»С‹ СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†": { "code": "30002", "name": "Р¤РёР»РёР°Р»С‹ СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†" },
-                    "РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ": { "code": "65143", "name": "РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ" },
-                    "Р¶РёР»РёС‰РЅС‹Рµ РЅР°РєРѕРїРёС‚РµР»СЊРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20103", "name": "Р–РёР»РёС‰РЅС‹Рµ РЅР°РєРѕРїРёС‚РµР»СЊРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "РѕСЂРіР°РЅС‹ РѕР±С‰РµСЃС‚РІРµРЅРЅРѕР№ СЃР°РјРѕРґРµСЏС‚РµР»СЊРЅРѕСЃС‚Рё": { "code": "20211", "name": "РћСЂРіР°РЅС‹ РѕР±С‰РµСЃС‚РІРµРЅРЅРѕР№ СЃР°РјРѕРґРµСЏС‚РµР»СЊРЅРѕСЃС‚Рё" },
-                    "СЂРµР»РёРіРёРѕР·РЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё": { "code": "71500", "name": "Р РµР»РёРіРёРѕР·РЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё" },
-                    "Р±Р»Р°РіРѕС‚РІРѕСЂРёС‚РµР»СЊРЅС‹Рµ С„РѕРЅРґС‹": { "code": "70401", "name": "Р‘Р»Р°РіРѕС‚РІРѕСЂРёС‚РµР»СЊРЅС‹Рµ С„РѕРЅРґС‹" },
-                    "С„РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75104", "name": "Р¤РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "СѓС‡СЂРµР¶РґРµРЅРёСЏ, СЃРѕР·РґР°РЅРЅС‹Рµ РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рј РѕР±СЂР°Р·РѕРІР°РЅРёРµРј (РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ)": { "code": "75400", "name": "РЈС‡СЂРµР¶РґРµРЅРёСЏ, СЃРѕР·РґР°РЅРЅС‹Рµ РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рј РѕР±СЂР°Р·РѕРІР°РЅРёРµРј (РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ)" },
-                    "РѕР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75505", "name": "РћР±С‰РµСЃС‚РІРµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "РїСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹ (Р°СЂС‚РµР»Рё)": { "code": "14000", "name": "РџСЂРѕРёР·РІРѕРґСЃС‚РІРµРЅРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹ (Р°СЂС‚РµР»Рё)" },
-                    "РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ Р°РІС‚РѕРЅРѕРјРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75401", "name": "РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ Р°РІС‚РѕРЅРѕРјРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "С…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°": { "code": "12000", "name": "РҐРѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°" },
-                    "Р°РґРІРѕРєР°С‚СЃРєРёРµ РїР°Р»Р°С‚С‹": { "code": "20609", "name": "РђРґРІРѕРєР°С‚СЃРєРёРµ РїР°Р»Р°С‚С‹" },
-                    "РѕР±С‰РµСЃС‚РІР° РІР·Р°РёРјРЅРѕРіРѕ СЃС‚СЂР°С…РѕРІР°РЅРёСЏ": { "code": "20108", "name": "РћР±С‰РµСЃС‚РІР° РІР·Р°РёРјРЅРѕРіРѕ СЃС‚СЂР°С…РѕРІР°РЅРёСЏ" },
-                    "СЃРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РѕР±С‰РµСЃС‚РІРµРЅРЅС‹С… РѕР±СЉРµРґРёРЅРµРЅРёР№": { "code": "20606", "name": "РЎРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РѕР±С‰РµСЃС‚РІРµРЅРЅС‹С… РѕР±СЉРµРґРёРЅРµРЅРёР№" },
-                    "РѕР±С‰РµСЃС‚РІР° СЃ РѕРіСЂР°РЅРёС‡РµРЅРЅРѕР№ РѕС‚РІРµС‚СЃС‚РІРµРЅРЅРѕСЃС‚СЊСЋ": { "code": "12300", "name": "РћР±С‰РµСЃС‚РІР° СЃ РѕРіСЂР°РЅРёС‡РµРЅРЅРѕР№ РѕС‚РІРµС‚СЃС‚РІРµРЅРЅРѕСЃС‚СЊСЋ" },
-                    "С…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїР°СЂС‚РЅРµСЂСЃС‚РІР°": { "code": "13000", "name": "РҐРѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїР°СЂС‚РЅРµСЂСЃС‚РІР°" },
-                    "СЃС‚СЂСѓРєС‚СѓСЂРЅС‹Рµ РїРѕРґСЂР°Р·РґРµР»РµРЅРёСЏ РѕР±РѕСЃРѕР±Р»РµРЅРЅС‹С… РїРѕРґСЂР°Р·РґРµР»РµРЅРёР№ СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†": { "code": "30004", "name": "РЎС‚СЂСѓРєС‚СѓСЂРЅС‹Рµ РїРѕРґСЂР°Р·РґРµР»РµРЅРёСЏ РѕР±РѕСЃРѕР±Р»РµРЅРЅС‹С… РїРѕРґСЂР°Р·РґРµР»РµРЅРёР№ СЋСЂРёРґРёС‡РµСЃРєРёС… Р»РёС†" },
-                    "РїСЂРѕСЃС‚С‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°": { "code": "30006", "name": "РџСЂРѕСЃС‚С‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°" },
-                    "РєРѕР»Р»РµРіРёРё Р°РґРІРѕРєР°С‚РѕРІ": { "code": "20616", "name": "РљРѕР»Р»РµРіРёРё Р°РґРІРѕРєР°С‚РѕРІ" },
-                    "С‚РѕСЂРіРѕРІРѕ-РїСЂРѕРјС‹С€Р»РµРЅРЅС‹Рµ РїР°Р»Р°С‚С‹": { "code": "20611", "name": "РўРѕСЂРіРѕРІРѕ-РїСЂРѕРјС‹С€Р»РµРЅРЅС‹Рµ РїР°Р»Р°С‚С‹" },
-                    "РёРЅРґРёРІРёРґСѓР°Р»СЊРЅС‹Рµ РїСЂРµРґРїСЂРёРЅРёРјР°С‚РµР»Рё": { "code": "50102", "name": "РРЅРґРёРІРёРґСѓР°Р»СЊРЅС‹Рµ РїСЂРµРґРїСЂРёРЅРёРјР°С‚РµР»Рё" },
-                    "РѕС‚РґРµР»РµРЅРёСЏ РёРЅРѕСЃС‚СЂР°РЅРЅС‹С… РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёС… РЅРµРїСЂР°РІРёС‚РµР»СЊСЃС‚РІРµРЅРЅС‹С… РѕСЂРіР°РЅРёР·Р°С†РёР№": { "code": "71610", "name": "РћС‚РґРµР»РµРЅРёСЏ РёРЅРѕСЃС‚СЂР°РЅРЅС‹С… РЅРµРєРѕРјРјРµСЂС‡РµСЃРєРёС… РЅРµРїСЂР°РІРёС‚РµР»СЊСЃС‚РІРµРЅРЅС‹С… РѕСЂРіР°РЅРёР·Р°С†РёР№" },
-                    "РіР°СЂР°Р¶РЅС‹Рµ Рё РіР°СЂР°Р¶РЅРѕ-СЃС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20101", "name": "Р“Р°СЂР°Р¶РЅС‹Рµ Рё РіР°СЂР°Р¶РЅРѕ-СЃС‚СЂРѕРёС‚РµР»СЊРЅС‹Рµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "С‡Р°СЃС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75500", "name": "Р§Р°СЃС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "СЌРєРѕР»РѕРіРёС‡РµСЃРєРёРµ С„РѕРЅРґС‹": { "code": "70404", "name": "Р­РєРѕР»РѕРіРёС‡РµСЃРєРёРµ С„РѕРЅРґС‹" },
-                    "РЅРµРїСЂР°РІРёС‚РµР»СЊСЃС‚РІРµРЅРЅС‹Рµ РјРµР¶РґСѓРЅР°СЂРѕРґРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё": { "code": "40002", "name": "РќРµРїСЂР°РІРёС‚РµР»СЊСЃС‚РІРµРЅРЅС‹Рµ РјРµР¶РґСѓРЅР°СЂРѕРґРЅС‹Рµ РѕСЂРіР°РЅРёР·Р°С†РёРё" },
-                    "СЃРѕСЋР·С‹ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёС… РѕР±С‰РµСЃС‚РІ": { "code": "20608", "name": "РЎРѕСЋР·С‹ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёС… РѕР±С‰РµСЃС‚РІ" },
-                    "С„РµРґРµСЂР°Р»СЊРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ": { "code": "65141", "name": "Р¤РµРґРµСЂР°Р»СЊРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ" },
-                    "РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20100", "name": "РџРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "С„РѕРЅРґС‹ РїСЂРѕРєР°С‚Р°": { "code": "20121", "name": "Р¤РѕРЅРґС‹ РїСЂРѕРєР°С‚Р°" },
-                    "РїСѓР±Р»РёС‡РЅРѕ-РїСЂР°РІРѕРІС‹Рµ РєРѕРјРїР°РЅРёРё": { "code": "71600", "name": "РџСѓР±Р»РёС‡РЅРѕ-РїСЂР°РІРѕРІС‹Рµ РєРѕРјРїР°РЅРёРё" },
-                    "С„РѕРЅРґС‹": { "code": "70400", "name": "Р¤РѕРЅРґС‹" },
-                    "С„РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р±СЋРґР¶РµС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75103", "name": "Р¤РµРґРµСЂР°Р»СЊРЅС‹Рµ РіРѕСЃСѓРґР°СЂСЃС‚РІРµРЅРЅС‹Рµ Р±СЋРґР¶РµС‚РЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "С‚РѕРІР°СЂРёС‰РµСЃС‚РІР° РЅР° РІРµСЂРµ (РєРѕРјРјР°РЅРґРёС‚РЅС‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°)": { "code": "11064", "name": "РўРѕРІР°СЂРёС‰РµСЃС‚РІР° РЅР° РІРµСЂРµ (РєРѕРјРјР°РЅРґРёС‚РЅС‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°)" },
-                    "РєСЂРµРґРёС‚РЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20104", "name": "РљСЂРµРґРёС‚РЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "С‚РѕРІР°СЂРёС‰РµСЃС‚РІР° СЃРѕР±СЃС‚РІРµРЅРЅРёРєРѕРІ Р¶РёР»СЊСЏ": { "code": "20716", "name": "РўРѕРІР°СЂРёС‰РµСЃС‚РІР° СЃРѕР±СЃС‚РІРµРЅРЅРёРєРѕРІ Р¶РёР»СЊСЏ" },
-                    "РѕР±С‰РёРЅС‹ РєРѕСЂРµРЅРЅС‹С… РјР°Р»РѕС‡РёСЃР»РµРЅРЅС‹С… РЅР°СЂРѕРґРѕРІ СЂРѕСЃСЃРёР№СЃРєРѕР№ С„РµРґРµСЂР°С†РёРё": { "code": "21200", "name": "РћР±С‰РёРЅС‹ РєРѕСЂРµРЅРЅС‹С… РјР°Р»РѕС‡РёСЃР»РµРЅРЅС‹С… РЅР°СЂРѕРґРѕРІ Р РѕСЃСЃРёР№СЃРєРѕР№ Р¤РµРґРµСЂР°С†РёРё" },
-                    "С…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°": { "code": "11000", "name": "РҐРѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ С‚РѕРІР°СЂРёС‰РµСЃС‚РІР°" },
-                    "РїР°РµРІС‹Рµ РёРЅРІРµСЃС‚РёС†РёРѕРЅРЅС‹Рµ С„РѕРЅРґС‹": { "code": "30005", "name": "РџР°РµРІС‹Рµ РёРЅРІРµСЃС‚РёС†РёРѕРЅРЅС‹Рµ С„РѕРЅРґС‹" },
-                    "РїРѕР»РёС‚РёС‡РµСЃРєРёРµ РїР°СЂС‚РёРё": { "code": "20201", "name": "РџРѕР»РёС‚РёС‡РµСЃРєРёРµ РїР°СЂС‚РёРё" },
-                    "РѕР±СЉРµРґРёРЅРµРЅРёСЏ СЂР°Р±РѕС‚РѕРґР°С‚РµР»РµР№": { "code": "20612", "name": "РћР±СЉРµРґРёРЅРµРЅРёСЏ СЂР°Р±РѕС‚РѕРґР°С‚РµР»РµР№" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ СЃР±С‹С‚РѕРІС‹Рµ (С‚РѕСЂРіРѕРІС‹Рµ) РєРѕРѕРїРµСЂР°С‚РёРІС‹": { "code": "20110", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРёРµ СЃР±С‹С‚РѕРІС‹Рµ (С‚РѕСЂРіРѕРІС‹Рµ) РєРѕРѕРїРµСЂР°С‚РёРІС‹" },
-                    "РЅРµРїСѓР±Р»РёС‡РЅС‹Рµ Р°РєС†РёРѕРЅРµСЂРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°": { "code": "12267", "name": "РќРµРїСѓР±Р»РёС‡РЅС‹Рµ Р°РєС†РёРѕРЅРµСЂРЅС‹Рµ РѕР±С‰РµСЃС‚РІР°" },
-                    "СЃРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РєРѕРѕРїРµСЂР°С‚РёРІРѕРІ": { "code": "20605", "name": "РЎРѕСЋР·С‹ (Р°СЃСЃРѕС†РёР°С†РёРё) РєРѕРѕРїРµСЂР°С‚РёРІРѕРІ" },
-                    "РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ": { "code": "75404", "name": "РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ РєР°Р·РµРЅРЅС‹Рµ СѓС‡СЂРµР¶РґРµРЅРёСЏ" },
-                    "РјСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ СѓРЅРёС‚Р°СЂРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ": { "code": "65243", "name": "РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Рµ СѓРЅРёС‚Р°СЂРЅС‹Рµ РїСЂРµРґРїСЂРёСЏС‚РёСЏ" },
-                    "Р°РґРІРѕРєР°С‚СЃРєРёРµ Р±СЋСЂРѕ": { "code": "20615", "name": "РђРґРІРѕРєР°С‚СЃРєРёРµ Р±СЋСЂРѕ" },
-                    "СЃРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ Р°СЂС‚РµР»Рё (РєРѕР»С…РѕР·С‹)": { "code": "14153", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅС‹Рµ Р°СЂС‚РµР»Рё (РєРѕР»С…РѕР·С‹)" },
-                }
-                recData = copy.deepcopy(RECORDS_TEMPLATES.get(list_name))
-                if list_name == "2. Р РµРµСЃС‚СЂ СЂР°Р·СЂРµС€РµРЅРёР№":
-                    
-                    if not TEST:
-                        orgOGRN = row.get("РћР“Р Рќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°")
-                        if pd.notna(orgOGRN) and orgOGRN.strip():
-                            orgSearchParams = {"ogrn": str(orgOGRN.strip())}
-                            unitSearch = get_unit(session, orgSearchParams, logger)
-                            if unitSearch is not None:
-                                unit = unitSearch.copy()
-                                unit["id"] = unit.pop("_id")
-                    recData["guid"] = generate_guid()
-                    recData["parentEntries"] = "reestrpermitsReestr"
-                    recData["unit"] = unit
-                    recData["generalInformation"] = {
-                        "Subject": row.get("РЎСѓР±СЉРµРєС‚ Р Р¤"),
-                        "Disctrict": row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ")
-                    }
-                    recData["permission"] = {
-                        "PermissionStatus": MAP_PERMISSION_STATUS[row.get("РЎС‚Р°С‚СѓСЃ СЂР°Р·СЂРµС€РµРЅРёСЏ").lower()],
-                        "PermissionNumber": row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                        "PermissionStartDate": row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                        "administrationName": None,
-                        "permissionEffectiveStartDate": row.get("Р”Р°С‚Р° РЅР°С‡Р°Р»Р° РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                        "PermissionEndDate": row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                        "permissionExtensionDate": row.get("Р”Р°С‚Р°, РґРѕ РєРѕС‚РѕСЂРѕР№ РїСЂРѕРґР»РµРЅРѕ РґРµР№СЃС‚РІРёРµ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                        "reissuePermissionFile": None
-                    }
-                elif list_name == "3. Р РµРµСЃС‚СЂ СЂС‹РЅРєРѕРІ":
-                    if not TEST:
-                        orgOGRN = row.get("РћР“Р Рќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°")
-                        if pd.notna(orgOGRN) and orgOGRN.strip():
-                            orgSearchParams = {"ogrn": str(orgOGRN.strip())}
-                            unitSearch = get_unit(session, orgSearchParams, logger)
-                            if unitSearch is not None:
-                                unit = unitSearch.copy()
-                                unit["id"] = unit.pop("_id")
-                    recData["guid"] = generate_guid()
-                    recData["parentEntries"] = "reestrmarketReestr"
-                    recData["unit"] = unit
-                    recData["TotalInfo"] = {
-                        "Subject":   row.get("РЎСѓР±СЉРµРєС‚ Р Р¤"),
-                        "Disctrict": row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ")
-                    }
-                    recData["InfoRetailMarket"] = {
-                        "RetailName": row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ СЂС‹РЅРєР°"),
-                        "PermissionStatus": MAP_PERMISSION_STATUS[row.get("РЎС‚Р°С‚СѓСЃ СЂР°Р·СЂРµС€РµРЅРёСЏ").lower()] if pd.notna(row.get("РЎС‚Р°С‚СѓСЃ СЂР°Р·СЂРµС€РµРЅРёСЏ")) else None,
-                        "PermissionNumber": row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ") if pd.notna(row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ")) else None,
-                        "PermissionStartDate": to_iso_date(row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ")) if pd.notna(row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ")) else None,
-                        "PermissionEndDate": to_iso_date(row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ")) if pd.notna(row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ")) else None,
-                        "marketType": MAP_MARKET_TYPE.get(row.get("РўРёРї СЂС‹РЅРєР°").lower(), {}).get("code") if pd.notna(row.get("РўРёРї СЂС‹РЅРєР°")) else None,
-                        "marketSpecialization":    MAP_SPECIALIZATION.get(row.get("РЎРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЂС‹РЅРєР°").lower(), {}).get("code") if pd.notna(row.get("РЎРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЂС‹РЅРєР°")) else None,
-                        "marketOtherSpecialization": row.get("Р”СЂСѓРіР°СЏ СЃРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЂС‹РЅРєР°") if pd.notna(row.get("Р”СЂСѓРіР°СЏ СЃРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЂС‹РЅРєР°")) else None,
-                        "constituentFiles": None,
-                        "GeoCoordinates": row.get("Р“РµРѕРєРѕРѕСЂРґРёРЅР°С‚С‹ С‚РѕС‡РєРё, РЅР° РєРѕС‚РѕСЂРѕР№ СЂР°СЃРїРѕР»РѕР¶РµРЅ СЂС‹РЅРѕРє") if pd.notna(row.get("Р“РµРѕРєРѕРѕСЂРґРёРЅР°С‚С‹ С‚РѕС‡РєРё, РЅР° РєРѕС‚РѕСЂРѕР№ СЂР°СЃРїРѕР»РѕР¶РµРЅ СЂС‹РЅРѕРє")) else None,
-                        "marketArea": float(row.get("РџР»РѕС‰Р°РґСЊ СЂС‹РЅРєР°, РєРІ. Рј.")) if pd.notna(row.get("РџР»РѕС‰Р°РґСЊ СЂС‹РЅРєР°, РєРІ. Рј.")) else None,
-                        "PlaceNumber": int(row.get("Р§РёСЃР»Рѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚, С€С‚.")) if pd.notna(row.get("Р§РёСЃР»Рѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚, С€С‚.")) else None,
-                        "operationPeriod": MAP_OPERATION_PERIOD.get(row.get("РџРµСЂРёРѕРґ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ").lower(), {"name": row.get("РџРµСЂРёРѕРґ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ") }) if pd.notna(row.get("РџРµСЂРёРѕРґ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ")) else None,
-                        "marketOpeningTime": row.get("РћСЃРЅРѕРІРЅРѕРµ РІСЂРµРјСЏ РЅР°С‡Р°Р»Р° СЂР°Р±РѕС‚С‹ СЂС‹РЅРєР°") if pd.notna(row.get("РћСЃРЅРѕРІРЅРѕРµ РІСЂРµРјСЏ РЅР°С‡Р°Р»Р° СЂР°Р±РѕС‚С‹ СЂС‹РЅРєР°")) else None,
-                        "marketClosingTime": row.get("РћСЃРЅРѕРІРЅРѕРµ РІСЂРµРјСЏ РѕРєРѕРЅС‡Р°РЅРёСЏ СЂР°Р±РѕС‚С‹ СЂС‹РЅРєР°") if pd.notna(row.get("РћСЃРЅРѕРІРЅРѕРµ РІСЂРµРјСЏ РѕРєРѕРЅС‡Р°РЅРёСЏ СЂР°Р±РѕС‚С‹ СЂС‹РЅРєР°")) else None,
-                        "sanitaryDayOfMonth": row.get("РЎР°РЅРёС‚Р°СЂРЅС‹Р№ РґРµРЅСЊ РјРµСЃСЏС†Р°") if pd.notna(row.get("РЎР°РЅРёС‚Р°СЂРЅС‹Р№ РґРµРЅСЊ РјРµСЃСЏС†Р°")) else None,
-                        "blockMarketAddress": [],
-                        "blockCadNumber": [],
-                        "cadsObjects": [],
-                        "dayOnBlock": [],
-                        "BlockDayOff": []
-                    }
-                    paUL = split_postal_address(row.get("Р®СЂРёРґРёС‡РµСЃРєРёР№ Р°РґСЂРµСЃ")) if pd.notna(row.get("Р®СЂРёРґРёС‡РµСЃРєРёР№ Р°РґСЂРµСЃ")) else {"postalCode": None, "fullAddress": None}
-                    paFA = split_postal_address(row.get("Р¤Р°РєС‚РёС‡РµСЃРєРёР№ Р°РґСЂРµСЃ")) if pd.notna(row.get("Р¤Р°РєС‚РёС‡РµСЃРєРёР№ Р°РґСЂРµСЃ")) else {"postalCode": None, "fullAddress": None}
-                    recData["InfoCompanyManagerMarket"] = {
-                        "OperatorName":   row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ РѕРїРµСЂР°С‚РѕСЂР°") if pd.notna(row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ РѕРїРµСЂР°С‚РѕСЂР°")) else None,
-                        "ShortNameUL":    row.get("РљСЂР°С‚РєРѕРµ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ Р®Р›") if pd.notna(row.get("РљСЂР°С‚РєРѕРµ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ Р®Р›")) else None,
-                        "AddressUL":     { "postalCode": paUL["postalCode"], "fullAddress": paUL["fullAddress"] },
-                        "AddressActual": { "postalCode": paFA["postalCode"], "fullAddress" : paFA["fullAddress"] },
-                        "OperatorINN":    normStr(row.get("РРќРќ РѕРїРµСЂР°С‚РѕСЂР°")) if pd.notna(row.get("РРќРќ РѕРїРµСЂР°С‚РѕСЂР°")) else None,
-                        "OperatorOGRN":   normStr(row.get("РћР“Р Рќ РѕРїРµСЂР°С‚РѕСЂР°")) if pd.notna(row.get("РћР“Р Рќ РѕРїРµСЂР°С‚РѕСЂР°")) else None,
-                        "RykFIO":         normStr(row.get("Р¤РРћ СЂСѓРєРѕРІРѕРґРёС‚РµР»СЏ")) if pd.notna(row.get("Р¤РРћ СЂСѓРєРѕРІРѕРґРёС‚РµР»СЏ")) else None,
-                        "OperatorNumber": normStr(row.get("РљРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ РѕРїРµСЂР°С‚РѕСЂР°")) if pd.notna(row.get("РљРѕРЅС‚Р°РєС‚РЅС‹Р№ РЅРѕРјРµСЂ РѕРїРµСЂР°С‚РѕСЂР°")) else None,
-                        "OperatorEmail":  normStr(row.get("РђРґСЂРµСЃ СЌР»РµРєС‚СЂРѕРЅРЅРѕР№ РїРѕС‡С‚С‹ РѕРїРµСЂР°С‚РѕСЂР°")) if pd.notna(row.get("РђРґСЂРµСЃ СЌР»РµРєС‚СЂРѕРЅРЅРѕР№ РїРѕС‡С‚С‹ РѕРїРµСЂР°С‚РѕСЂР°")) else None,
-                        "OrgStateForm": MAP_ORG_STATE_FORM.get(row.get("РћСЂРіР°РЅРёР·Р°С†РёРѕРЅРЅРѕ-РїСЂР°РІРѕРІР°СЏ С„РѕСЂРјР°").lower(), {"name": row.get("РћСЂРіР°РЅРёР·Р°С†РёРѕРЅРЅРѕ-РїСЂР°РІРѕРІР°СЏ С„РѕСЂРјР°") }) if pd.notna(row.get("РћСЂРіР°РЅРёР·Р°С†РёРѕРЅРЅРѕ-РїСЂР°РІРѕРІР°СЏ С„РѕСЂРјР°")) else None
-                    }
-
-                if(TEST):
-                    logger.info(f"TEST MODE: РЎС‚СЂСѓРєС‚СѓСЂР° РґР»СЏ СЃС‚СЂРѕРєРё {i} | {json.dumps(recData, ensure_ascii=False)}")
-                    if list_name == "3. Р РµРµСЃС‚СЂ СЂС‹РЅРєРѕРІ":
-                        logger.info(
-                            f"TEST MODE NSI {list_name}: "
-                            f"{json.dumps(build_nsi_local_object_market_payload(row, unit, recData['guid']), ensure_ascii=False)}"
-                        )
-                    continue
-
-                recordURL = f"{BASE_URL}/api/v1/create/{recData['parentEntries']}"
-                recordRes = api_request(session, logger, "post", recordURL, json=jsonable(recData))
-                if not recordRes.ok:
-                    logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё Р·Р°РїРёСЃРё")
-                    failLogger.info(i)
-                    failed_rows += 1
-                    continue
-                recordResJSON = recordRes.json()
-                record_id = recordResJSON["_id"]
-                record_guid = recordResJSON["guid"]
-                if not TEST:
-                    # Files pathes
-                    files_pathes = []
-                    fileExeption = False
-                    if pd.notna(row.get("Р Р°Р·СЂРµС€РµРЅРёРµ РЅР° РѕСЂРіР°РЅРёР·Р°С†РёСЋ СЂРѕР·РЅРёС‡РЅРѕРіРѕ СЂС‹РЅРєР°")) and isinstance(row.get("Р Р°Р·СЂРµС€РµРЅРёРµ РЅР° РѕСЂРіР°РЅРёР·Р°С†РёСЋ СЂРѕР·РЅРёС‡РЅРѕРіРѕ СЂС‹РЅРєР°"), str) and row.get("Р Р°Р·СЂРµС€РµРЅРёРµ РЅР° РѕСЂРіР°РЅРёР·Р°С†РёСЋ СЂРѕР·РЅРёС‡РЅРѕРіРѕ СЂС‹РЅРєР°") != "":
-                        fileIds = row.get("Р Р°Р·СЂРµС€РµРЅРёРµ РЅР° РѕСЂРіР°РЅРёР·Р°С†РёСЋ СЂРѕР·РЅРёС‡РЅРѕРіРѕ СЂС‹РЅРєР°").split(";")
-                        for fileId in fileIds:
-                            fileId_clean = fileId.replace("\n", "").replace("\r", "")
-                            file_path = find_file_in_dir(files_dir_active, fileId_clean)
-                            if file_path:
-                                logger.info(f"РќР°Р№РґРµРЅ С„Р°Р№Р»: {os.path.basename(file_path)}")
-                                files_pathes.append(file_path)
-                            else:
-                                logger.error(f"Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ РїРѕ С€Р°Р±Р»РѕРЅСѓ: {fileId_clean}")
-                                fileExeption = True
-                                break
-                    if fileExeption:
-                        failLogger.info(i)
-                        failed_rows += 1
-                        delete_from_collection(session, logger, recordResJSON)
-                        logger.info(f"РћС€РёР±РєР° РїСЂРё РїРѕР»СѓС‡РµРЅРёРё С„Р°Р№Р»Р° {i}")
-                        continue
-                    # Files upload
-                    file_objects = []
-                    exception_f_o = False
-                    for file_p in files_pathes:
-                        logger.info(f"Р—Р°РіСЂСѓР·РєР° С„Р°Р№Р»Р° {file_p}")
-                        file_object = upload_file(session, logger, file_p, recData["parentEntries"], record_id, entity_field_path="")
-                        if file_object is None:
-                            logger.error(f"РћС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ С„Р°Р№Р»Р° {file_p}")
-                            failLogger.info(i)
-                            failed_rows += 1
-                            exception_f_o = True
-                            break
-                        file_objects.append(file_object)
-                    if exception_f_o:
-                        logger.info(f"РЈРґР°Р»РµРЅРёРµ РґР°РЅРЅС‹С… РїРѕ {i}")
-                        for file_o in file_objects:
-                            delete_file_from_storage(session, logger, file_o._id)
-                            delete_from_collection(session, logger, recordResJSON)
-                        failLogger.info(i)
-                        failed_rows += 1
-                        logger.info(f"Р—Р°РІРµСЂС€РµРЅРѕ СѓРґР°Р»РµРЅРёРµ РґР°РЅРЅС‹С… РїРѕ {i}")
-                        continue
-                    if len(file_objects) > 0:
-                        updRecData = {
-                            "_id": record_id,
-                            "guid": record_guid,
-                            "parentEntries": recData['parentEntries'],
-                            "permission": {
-                                "PermissionStatus": MAP_PERMISSION_STATUS[row.get("РЎС‚Р°С‚СѓСЃ СЂР°Р·СЂРµС€РµРЅРёСЏ").lower()],
-                                "PermissionNumber": row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                                "PermissionStartDate": row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                                "administrationName": None,
-                                "permissionEffectiveStartDate": row.get("Р”Р°С‚Р° РЅР°С‡Р°Р»Р° РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                                "PermissionEndDate": row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                                "permissionExtensionDate": row.get("Р”Р°С‚Р°, РґРѕ РєРѕС‚РѕСЂРѕР№ РїСЂРѕРґР»РµРЅРѕ РґРµР№СЃС‚РІРёРµ СЂР°Р·СЂРµС€РµРЅРёСЏ"),
-                                "reissuePermissionFile": file_objects[0]
-                            }
-                        }
-                        recordUpdURL = f"{BASE_URL}/api/v1/update/{recData['parentEntries']}?mainId={record_id}&guid={recordResJSON['guid']}"
-                        recUpdRes = api_request(session, logger, "put", recordUpdURL, json=jsonable(updRecData))
-                        if recUpdRes.status_code != requests.codes.ok:
-                            logger.info(f"РЈРґР°Р»РµРЅРёРµ РґР°РЅРЅС‹С… РїРѕ {i}")
-                            for file_o in file_objects:
-                                delete_file_from_storage(session, logger, file_o["_id"])
-                            delete_from_collection(session, logger, recordResJSON)
-                            failLogger.info(i)
-                            failed_rows += 1
-                            logger.info(f"Р—Р°РІРµСЂС€РµРЅРѕ СѓРґР°Р»РµРЅРёРµ РґР°РЅРЅС‹С… РїРѕ {i}")
+                    if resume_enabled:
+                        checkpoint = state.get(str(workbook_path), list_name, i)
+                        if isinstance(checkpoint, dict):
+                            resumed_skips += 1
+                            logger.info(
+                                "[RESUME][SKIP] workbook=%s sheet=%s row=%s _id=%s",
+                                workbook_path.name,
+                                list_name,
+                                i,
+                                checkpoint.get("_id"),
+                            )
                             continue
-                # Final log
-                logger.info(f"РЎРѕР·РґР°РЅР° СЃС‚СЂСѓРєС‚СѓСЂР° РґР»СЏ СЃС‚СЂРѕРєРё {i} | _id Р·Р°РїРёСЃРё - {record_id}")
-                log_success(successLogger, {"_id": record_id, "guid": record_guid, "parentEntries": recData["parentEntries"]})
 
-                if list_name == "3. Р РµРµСЃС‚СЂ СЂС‹РЅРєРѕРІ":
-                    local_payload = build_nsi_local_object_market_payload(row, unit, record_guid)
-                    localRecordURL = f"{BASE_URL}/api/v1/create/{NSI_LOCAL_OBJECT_MARKET_COLLECTION}"
-                    localRecordRes = api_request(session, logger, "post", localRecordURL, json=jsonable(local_payload))
-                    if not localRecordRes.ok:
-                        logger.error("РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё Р·Р°РїРёСЃРё РІ nsiLocalObjectMarket")
-                        failLogger.info(f"{list_name}:{i}:nsi")
-                        failed_rows += 1
-                        continue
-                    localRecordJSON = localRecordRes.json()
-                    logger.info(
-                        f"РЎРѕР·РґР°РЅР° Р·Р°РїРёСЃСЊ РІ {NSI_LOCAL_OBJECT_MARKET_COLLECTION} | "
-                        f"_id Р·Р°РїРёСЃРё - {localRecordJSON.get('_id')}"
-                    )
-                    log_success(
-                        successLogger,
-                        {
-                            "_id": localRecordJSON.get("_id"),
-                            "guid": localRecordJSON.get("guid", local_payload["guid"]),
-                            "parentEntries": NSI_LOCAL_OBJECT_MARKET_COLLECTION
+                    processed_rows += 1
+                    unit = UNIT
+
+                    if TEST:
+                        print(row)
+                    MAP_PERMISSION_STATUS = {
+                        "действует":      { "code": "Working",     "name": "Действует" },
+                        "приостановлено": { "code": "Stop",        "name": "Приостановлено" },
+                        "аннулировано":   { "code": "Annul",       "name": "Аннулировано" },
+                        "не действует":   { "code": "doesNotWork", "name": "Не действует" },
+                        "черновик":       { "code": "Draft",       "name": "Черновик" }
+                    }
+                    MAP_MARKET_TYPE = {
+                        "специализированный": { "code": "Specialized", "_id": "68ed17bb27eea1af1d5473f7", "name": "Специализированный" },
+                        "универсальный":      { "code": "Universal",   "_id": "68ed1979b12469d98995f24e", "name": "Универсальный" }
+                    }
+                    MAP_SPECIALIZATION = {
+                        "сельскохозяйственный":                       { "code":"Agricultural", "parentId":"68ed17bb27eea1af1d5473f7", "name":"Сельскохозяйственный" },
+                        "сельскохозяйственный кооперативный":        { "code":"AgriculturalCooperative", "parentId":"68ed17bb27eea1af1d5473f7", "name":"Сельскохозяйственный кооперативный" },
+                        "вещевой":                                   { "code":"Clothing", "parentId":"68ed17bb27eea1af1d5473f7", "name":"Вещевой" },
+                        "по продаже радио- и электробытовой техники": { "code":"For the sale of radio and electrical appliances", "parentId":"68ed17bb27eea1af1d5473f7", "name":"По продаже радио- и электробытовой техники" },
+                        "иная":                                      { "code":"Other", "parentId":"68ed17bb27eea1af1d5473f7", "name":"Иная" },
+                        "иное":                                      { "code":"Other", "parentId":"68ed17bb27eea1af1d5473f7", "name":"Иная" },
+                        "по продаже строительных материалов":         { "code":"SaleBuildingMaterials", "parentId":"68ed17bb27eea1af1d5473f7", "name":"По продаже строительных материалов" },
+                        "по продаже продуктов питания":               { "code":"SaleProducts", "parentId":"68ed17bb27eea1af1d5473f7", "name":"По продаже продуктов питания" }
+                    }
+                    MAP_OPERATION_PERIOD = {
+                        "постоянный": { "code":"PermanentType", "name":"Постоянный" },
+                        "временный":  { "code":"TemporaryType", "name":"Временный" }
+                    }
+                    MAP_ORG_STATE_FORM = {
+                        "негосударственные пенсионные фонды": { "code": "70402", "name": "Негосударственные пенсионные фонды" },
+                        "районные суды, городские суды, межрайонные суды (районные суды)": { "code": "30008", "name": "Районные суды, городские суды, межрайонные суды (районные суды)" },
+                        "товарищества собственников недвижимости": { "code": "20700", "name": "Товарищества собственников недвижимости" },
+                        "обособленные подразделения юридических лиц": { "code": "30003", "name": "Обособленные подразделения юридических лиц" },
+                        "адвокаты, учредившие адвокатский кабинет": { "code": "50201", "name": "Адвокаты, учредившие адвокатский кабинет" },
+                        "сельскохозяйственные потребительские животноводческие кооперативы": { "code": "20115", "name": "Сельскохозяйственные потребительские животноводческие кооперативы" },
+                        "садоводческие или огороднические некоммерческие товарищества": { "code": "20702", "name": "Садоводческие или огороднические некоммерческие товарищества" },
+                        "жилищные или жилищно-строительные кооперативы": { "code": "20102", "name": "Жилищные или жилищно-строительные кооперативы" },
+                        "казачьи общества, внесенные в государственный реестр казачьих обществ в российской федерации": { "code": "21100", "name": "Казачьи общества, внесенные в государственный реестр казачьих обществ в Российской Федерации" },
+                        "сельскохозяйственные производственные кооперативы": { "code": "14100", "name": "Сельскохозяйственные производственные кооперативы" },
+                        "нотариусы, занимающиеся частной практикой": { "code": "50202", "name": "Нотариусы, занимающиеся частной практикой" },
+                        "крестьянские (фермерские) хозяйства": { "code": "15300", "name": "Крестьянские (фермерские) хозяйства" },
+                        "благотворительные учреждения": { "code": "75502", "name": "Благотворительные учреждения" },
+                        "прочие юридические лица, являющиеся коммерческими организациями": { "code": "19000", "name": "Прочие юридические лица, являющиеся коммерческими организациями" },
+                        "объединения фермерских хозяйств": { "code": "20613", "name": "Объединения фермерских хозяйств" },
+                        "нотариальные палаты": { "code": "20610", "name": "Нотариальные палаты" },
+                        "некоммерческие партнерства": { "code": "20614", "name": "Некоммерческие партнерства" },
+                        "общественные фонды": { "code": "70403", "name": "Общественные фонды" },
+                        "федеральные государственные автономные учреждения": { "code": "75101", "name": "Федеральные государственные автономные учреждения" },
+                        "сельскохозяйственные потребительские обслуживающие кооперативы": { "code": "20111", "name": "Сельскохозяйственные потребительские обслуживающие кооперативы" },
+                        "общественные организации": { "code": "20200", "name": "Общественные  организации" },
+                        "государственные корпорации": { "code": "71601", "name": "Государственные корпорации" },
+                        "главы крестьянских (фермерских) хозяйств": { "code": "50101", "name": "Главы крестьянских (фермерских) хозяйств" },
+                        "автономные некоммерческие организации": { "code": "71400", "name": "Автономные некоммерческие организации" },
+                        "учреждения": { "code": "75000", "name": "Учреждения" },
+                        "государственные автономные учреждения субъектов российской федерации": { "code": "75201", "name": "Государственные автономные учреждения субъектов Российской Федерации" },
+                        "объединения (ассоциации и союзы) благотворительных организаций": { "code": "20620", "name": "Объединения (ассоциации и союзы) благотворительных организаций" },
+                        "публичные акционерные общества": { "code": "12247", "name": "Публичные акционерные общества" },
+                        "государственные академии наук": { "code": "75300", "name": "Государственные академии наук" },
+                        "государственные компании": { "code": "71602", "name": "Государственные компании" },
+                        "представительства юридических лиц": { "code": "30001", "name": "Представительства юридических лиц" },
+                        "государственные бюджетные учреждения субъектов российской федерации": { "code": "75203", "name": "Государственные бюджетные учреждения субъектов Российской Федерации" },
+                        "союзы (ассоциации) кредитных кооперативов": { "code": "20604", "name": "Союзы (ассоциации) кредитных кооперативов" },
+                        "межправительственные международные организации": { "code": "40001", "name": "Межправительственные международные организации" },
+                        "муниципальные бюджетные учреждения": { "code": "75403", "name": "Муниципальные бюджетные учреждения" },
+                        "государственные унитарные предприятия субъектов российской федерации": { "code": "65242", "name": "Государственные унитарные предприятия субъектов Российской Федерации" },
+                        "полные товарищества": { "code": "11051", "name": "Полные товарищества" },
+                        "общественные движения": { "code": "20210", "name": "Общественные движения" },
+                        "рыболовецкие артели (колхозы)": { "code": "14154", "name": "Рыболовецкие артели (колхозы)" },
+                        "потребительские общества": { "code": "20107", "name": "Потребительские общества" },
+                        "союзы (ассоциации) общин малочисленных народов": { "code": "20607", "name": "Союзы (ассоциации) общин малочисленных народов" },
+                        "сельскохозяйственные потребительские перерабатывающие кооперативы": { "code": "20109", "name": "Сельскохозяйственные потребительские перерабатывающие  кооперативы" },
+                        "учреждения, созданные российской федерацией": { "code": "75100", "name": "Учреждения, созданные Российской Федерацией" },
+                        "производственные кооперативы (кроме сельскохозяйственных производственных кооперативов)": { "code": "14200", "name": "Производственные кооперативы (кроме сельскохозяйственных производственных кооперативов)" },
+                        "учреждения, созданные субъектом российской федерации": { "code": "75200", "name": "Учреждения, созданные субъектом Российской Федерации" },
+                        "государственные казенные учреждения субъектов российской федерации": { "code": "75204", "name": "Государственные казенные учреждения субъектов Российской Федерации" },
+                        "федеральные государственные унитарные предприятия": { "code": "65241", "name": "Федеральные государственные унитарные предприятия" },
+                        "саморегулируемые организации": { "code": "20619", "name": "Саморегулируемые организации" },
+                        "территориальные общественные самоуправления": { "code": "20217", "name": "Территориальные общественные самоуправления" },
+                        "акционерные общества": { "code": "12200", "name": "Акционерные общества" },
+                        "кредитные потребительские кооперативы граждан": { "code": "20105", "name": "Кредитные потребительские  кооперативы граждан" },
+                        "казенные предприятия субъектов российской федерации": { "code": "65142", "name": "Казенные предприятия субъектов Российской Федерации" },
+                        "советы муниципальных образований субъектов российской федерации": { "code": "20603", "name": "Советы муниципальных образований субъектов Российской Федерации" },
+                        "сельскохозяйственные потребительские снабженческие кооперативы": { "code": "20112", "name": "Сельскохозяйственные потребительские снабженческие кооперативы" },
+                        "ассоциации (союзы)": { "code": "20600", "name": "Ассоциации (союзы)" },
+                        "филиалы юридических лиц": { "code": "30002", "name": "Филиалы юридических лиц" },
+                        "муниципальные казенные предприятия": { "code": "65143", "name": "Муниципальные казенные предприятия" },
+                        "жилищные накопительные кооперативы": { "code": "20103", "name": "Жилищные накопительные кооперативы" },
+                        "органы общественной самодеятельности": { "code": "20211", "name": "Органы общественной самодеятельности" },
+                        "религиозные организации": { "code": "71500", "name": "Религиозные организации" },
+                        "благотворительные фонды": { "code": "70401", "name": "Благотворительные фонды" },
+                        "федеральные государственные казенные учреждения": { "code": "75104", "name": "Федеральные государственные казенные учреждения" },
+                        "учреждения, созданные муниципальным образованием (муниципальные учреждения)": { "code": "75400", "name": "Учреждения, созданные муниципальным образованием (муниципальные учреждения)" },
+                        "общественные учреждения": { "code": "75505", "name": "Общественные учреждения" },
+                        "производственные кооперативы (артели)": { "code": "14000", "name": "Производственные кооперативы (артели)" },
+                        "муниципальные автономные учреждения": { "code": "75401", "name": "Муниципальные автономные учреждения" },
+                        "хозяйственные общества": { "code": "12000", "name": "Хозяйственные общества" },
+                        "адвокатские палаты": { "code": "20609", "name": "Адвокатские палаты" },
+                        "общества взаимного страхования": { "code": "20108", "name": "Общества взаимного страхования" },
+                        "союзы (ассоциации) общественных объединений": { "code": "20606", "name": "Союзы (ассоциации) общественных объединений" },
+                        "общества с ограниченной ответственностью": { "code": "12300", "name": "Общества с ограниченной ответственностью" },
+                        "хозяйственные партнерства": { "code": "13000", "name": "Хозяйственные партнерства" },
+                        "структурные подразделения обособленных подразделений юридических лиц": { "code": "30004", "name": "Структурные подразделения обособленных подразделений юридических лиц" },
+                        "простые товарищества": { "code": "30006", "name": "Простые товарищества" },
+                        "коллегии адвокатов": { "code": "20616", "name": "Коллегии адвокатов" },
+                        "торгово-промышленные палаты": { "code": "20611", "name": "Торгово-промышленные палаты" },
+                        "индивидуальные предприниматели": { "code": "50102", "name": "Индивидуальные предприниматели" },
+                        "отделения иностранных некоммерческих неправительственных организаций": { "code": "71610", "name": "Отделения иностранных некоммерческих неправительственных организаций" },
+                        "гаражные и гаражно-строительные кооперативы": { "code": "20101", "name": "Гаражные и гаражно-строительные кооперативы" },
+                        "частные учреждения": { "code": "75500", "name": "Частные учреждения" },
+                        "экологические фонды": { "code": "70404", "name": "Экологические фонды" },
+                        "неправительственные международные организации": { "code": "40002", "name": "Неправительственные международные организации" },
+                        "союзы потребительских обществ": { "code": "20608", "name": "Союзы потребительских обществ" },
+                        "федеральные казенные предприятия": { "code": "65141", "name": "Федеральные казенные предприятия" },
+                        "потребительские кооперативы": { "code": "20100", "name": "Потребительские кооперативы" },
+                        "фонды проката": { "code": "20121", "name": "Фонды проката" },
+                        "публично-правовые компании": { "code": "71600", "name": "Публично-правовые компании" },
+                        "фонды": { "code": "70400", "name": "Фонды" },
+                        "федеральные государственные бюджетные учреждения": { "code": "75103", "name": "Федеральные государственные бюджетные учреждения" },
+                        "товарищества на вере (коммандитные товарищества)": { "code": "11064", "name": "Товарищества на вере (коммандитные товарищества)" },
+                        "кредитные потребительские кооперативы": { "code": "20104", "name": "Кредитные потребительские кооперативы" },
+                        "товарищества собственников жилья": { "code": "20716", "name": "Товарищества собственников жилья" },
+                        "общины коренных малочисленных народов российской федерации": { "code": "21200", "name": "Общины коренных малочисленных народов Российской Федерации" },
+                        "хозяйственные товарищества": { "code": "11000", "name": "Хозяйственные товарищества" },
+                        "паевые инвестиционные фонды": { "code": "30005", "name": "Паевые инвестиционные фонды" },
+                        "политические партии": { "code": "20201", "name": "Политические партии" },
+                        "объединения работодателей": { "code": "20612", "name": "Объединения работодателей" },
+                        "сельскохозяйственные потребительские сбытовые (торговые) кооперативы": { "code": "20110", "name": "Сельскохозяйственные потребительские сбытовые (торговые) кооперативы" },
+                        "непубличные акционерные общества": { "code": "12267", "name": "Непубличные акционерные общества" },
+                        "союзы (ассоциации) кооперативов": { "code": "20605", "name": "Союзы (ассоциации) кооперативов" },
+                        "муниципальные казенные учреждения": { "code": "75404", "name": "Муниципальные казенные учреждения" },
+                        "муниципальные унитарные предприятия": { "code": "65243", "name": "Муниципальные унитарные предприятия" },
+                        "адвокатские бюро": { "code": "20615", "name": "Адвокатские бюро" },
+                        "сельскохозяйственные артели (колхозы)": { "code": "14153", "name": "Сельскохозяйственные артели (колхозы)" },
+                    }
+                    recData = copy.deepcopy(RECORDS_TEMPLATES.get(list_name))
+                    if list_name == "2. Реестр разрешений":
+                        
+                        if not TEST and not args.dry_run and session is not None:
+                            orgOGRN = row.get("ОГРН уполномоченного органа")
+                            if pd.notna(orgOGRN) and orgOGRN.strip():
+                                orgSearchParams = {"ogrn": str(orgOGRN.strip())}
+                                unitSearch = get_unit(session, orgSearchParams, logger)
+                                if unitSearch is not None:
+                                    unit = unitSearch.copy()
+                                    unit["id"] = unit.pop("_id")
+                        recData["guid"] = generate_guid()
+                        recData["parentEntries"] = "reestrpermitsReestr"
+                        recData["unit"] = unit
+                        recData["generalInformation"] = {
+                            "Subject": row.get("Субъект РФ"),
+                            "Disctrict": row.get("Муниципальный район/округ, городской округ или внутригородская территория")
                         }
+                        recData["permission"] = {
+                            "PermissionStatus": MAP_PERMISSION_STATUS[row.get("Статус разрешения").lower()],
+                            "PermissionNumber": row.get("Номер разрешения"),
+                            "PermissionStartDate": row.get("Дата выдачи разрешения"),
+                            "administrationName": None,
+                            "permissionEffectiveStartDate": row.get("Дата начала действия разрешения"),
+                            "PermissionEndDate": row.get("Дата завершения действия разрешения"),
+                            "permissionExtensionDate": row.get("Дата, до которой продлено действие разрешения"),
+                            "reissuePermissionFile": None
+                        }
+                    elif list_name == "3. Реестр рынков":
+                        if not TEST and not args.dry_run and session is not None:
+                            orgOGRN = row.get("ОГРН уполномоченного органа")
+                            if pd.notna(orgOGRN) and orgOGRN.strip():
+                                orgSearchParams = {"ogrn": str(orgOGRN.strip())}
+                                unitSearch = get_unit(session, orgSearchParams, logger)
+                                if unitSearch is not None:
+                                    unit = unitSearch.copy()
+                                    unit["id"] = unit.pop("_id")
+                        recData["guid"] = generate_guid()
+                        recData["parentEntries"] = "reestrmarketReestr"
+                        recData["unit"] = unit
+                        recData["TotalInfo"] = {
+                            "Subject":   row.get("Субъект РФ"),
+                            "Disctrict": row.get("Муниципальный район/округ, городской округ или внутригородская территория")
+                        }
+                        recData["InfoRetailMarket"] = {
+                            "RetailName": row.get("Наименование рынка"),
+                            "PermissionStatus": MAP_PERMISSION_STATUS[row.get("Статус разрешения").lower()] if pd.notna(row.get("Статус разрешения")) else None,
+                            "PermissionNumber": row.get("Номер разрешения") if pd.notna(row.get("Номер разрешения")) else None,
+                            "PermissionStartDate": to_iso_date(row.get("Дата выдачи разрешения")) if pd.notna(row.get("Дата выдачи разрешения")) else None,
+                            "PermissionEndDate": to_iso_date(row.get("Дата завершения действия разрешения")) if pd.notna(row.get("Дата завершения действия разрешения")) else None,
+                            "marketType": MAP_MARKET_TYPE.get(row.get("Тип рынка").lower(), {}).get("code") if pd.notna(row.get("Тип рынка")) else None,
+                            "marketSpecialization":    MAP_SPECIALIZATION.get(row.get("Специализация рынка").lower(), {}).get("code") if pd.notna(row.get("Специализация рынка")) else None,
+                            "marketOtherSpecialization": row.get("Другая специализация рынка") if pd.notna(row.get("Другая специализация рынка")) else None,
+                            "constituentFiles": None,
+                            "GeoCoordinates": row.get("Геокоординаты точки, на которой расположен рынок") if pd.notna(row.get("Геокоординаты точки, на которой расположен рынок")) else None,
+                            "marketArea": float(row.get("Площадь рынка, кв. м.")) if pd.notna(row.get("Площадь рынка, кв. м.")) else None,
+                            "PlaceNumber": int(row.get("Число торговых мест, шт.")) if pd.notna(row.get("Число торговых мест, шт.")) else None,
+                            "operationPeriod": MAP_OPERATION_PERIOD.get(row.get("Период действия разрешения").lower(), {"name": row.get("Период действия разрешения") }) if pd.notna(row.get("Период действия разрешения")) else None,
+                            "marketOpeningTime": row.get("Основное время начала работы рынка") if pd.notna(row.get("Основное время начала работы рынка")) else None,
+                            "marketClosingTime": row.get("Основное время окончания работы рынка") if pd.notna(row.get("Основное время окончания работы рынка")) else None,
+                            "sanitaryDayOfMonth": row.get("Санитарный день месяца") if pd.notna(row.get("Санитарный день месяца")) else None,
+                            "blockMarketAddress": [],
+                            "blockCadNumber": [],
+                            "cadsObjects": [],
+                            "dayOnBlock": [],
+                            "BlockDayOff": []
+                        }
+                        paUL = split_postal_address(row.get("Юридический адрес")) if pd.notna(row.get("Юридический адрес")) else {"postalCode": None, "fullAddress": None}
+                        paFA = split_postal_address(row.get("Фактический адрес")) if pd.notna(row.get("Фактический адрес")) else {"postalCode": None, "fullAddress": None}
+                        recData["InfoCompanyManagerMarket"] = {
+                            "OperatorName":   row.get("Наименование оператора") if pd.notna(row.get("Наименование оператора")) else None,
+                            "ShortNameUL":    row.get("Краткое наименование ЮЛ") if pd.notna(row.get("Краткое наименование ЮЛ")) else None,
+                            "AddressUL":     { "postalCode": paUL["postalCode"], "fullAddress": paUL["fullAddress"] },
+                            "AddressActual": { "postalCode": paFA["postalCode"], "fullAddress" : paFA["fullAddress"] },
+                            "OperatorINN":    normStr(row.get("ИНН оператора")) if pd.notna(row.get("ИНН оператора")) else None,
+                            "OperatorOGRN":   normStr(row.get("ОГРН оператора")) if pd.notna(row.get("ОГРН оператора")) else None,
+                            "RykFIO":         normStr(row.get("ФИО руководителя")) if pd.notna(row.get("ФИО руководителя")) else None,
+                            "OperatorNumber": normStr(row.get("Контактный номер оператора")) if pd.notna(row.get("Контактный номер оператора")) else None,
+                            "OperatorEmail":  normStr(row.get("Адрес электронной почты оператора")) if pd.notna(row.get("Адрес электронной почты оператора")) else None,
+                            "OrgStateForm": MAP_ORG_STATE_FORM.get(row.get("Организационно-правовая форма").lower(), {"name": row.get("Организационно-правовая форма") }) if pd.notna(row.get("Организационно-правовая форма")) else None
+                        }
+
+                    if TEST or args.dry_run:
+                        logger.info(f"TEST MODE: Структура для строки {i} | {json.dumps(recData, ensure_ascii=False)}")
+                        if list_name == "3. Реестр рынков":
+                            logger.info(
+                                f"TEST MODE NSI {list_name}: "
+                                f"{json.dumps(build_nsi_local_object_market_payload(row, unit, recData['guid']), ensure_ascii=False)}"
+                            )
+                        continue
+
+                    recordURL = f"{get_runtime_base_url()}/api/v1/create/{recData['parentEntries']}"
+                    recordRes = api_request(session, logger, "post", recordURL, json=jsonable(recData))
+                    if not recordRes.ok:
+                        logger.error(f"Ошибка при создании записи")
+                        failLogger.info(i)
+                        failed_rows += 1
+                        action = _operator_action_on_row_error(
+                            operator_mode=bool(args.operator_mode),
+                            interactive=interactive,
+                            logger=logger,
+                            context=f"workbook={workbook_path.name} sheet={list_name} row={i}: создание записи",
+                        )
+                        if action == "abort":
+                            stopped = True
+                            break
+                        continue
+                    recordResJSON = recordRes.json()
+                    record_id = recordResJSON["_id"]
+                    record_guid = recordResJSON["guid"]
+                    if not TEST and not args.dry_run and session is not None:
+                        # Files pathes
+                        files_pathes = []
+                        fileExeption = False
+                        if pd.notna(row.get("Разрешение на организацию розничного рынка")) and isinstance(row.get("Разрешение на организацию розничного рынка"), str) and row.get("Разрешение на организацию розничного рынка") != "":
+                            fileIds = row.get("Разрешение на организацию розничного рынка").split(";")
+                            for fileId in fileIds:
+                                fileId_clean = fileId.replace("\n", "").replace("\r", "")
+                                file_path = find_file_in_dir(files_dir_active, fileId_clean)
+                                if file_path:
+                                    logger.info(f"Найден файл: {os.path.basename(file_path)}")
+                                    files_pathes.append(file_path)
+                                else:
+                                    logger.error(f"Файл не найден по шаблону: {fileId_clean}")
+                                    fileExeption = True
+                                    break
+                        if fileExeption:
+                            failLogger.info(i)
+                            failed_rows += 1
+                            delete_from_collection(session, logger, recordResJSON)
+                            logger.info(f"Ошибка при получении файла {i}")
+                            action = _operator_action_on_row_error(
+                                operator_mode=bool(args.operator_mode),
+                                interactive=interactive,
+                                logger=logger,
+                                context=f"workbook={workbook_path.name} sheet={list_name} row={i}: файл не найден",
+                            )
+                            if action == "abort":
+                                stopped = True
+                                break
+                            continue
+                        # Files upload
+                        file_objects = []
+                        exception_f_o = False
+                        for file_p in files_pathes:
+                            logger.info(f"Загрузка файла {file_p}")
+                            file_object = upload_file(session, logger, file_p, recData["parentEntries"], record_id, entity_field_path="")
+                            if file_object is None:
+                                logger.error(f"Ошибка при загрузке файла {file_p}")
+                                failLogger.info(i)
+                                failed_rows += 1
+                                exception_f_o = True
+                                break
+                            file_objects.append(file_object)
+                        if exception_f_o:
+                            logger.info(f"Удаление данных по {i}")
+                            for file_o in file_objects:
+                                delete_file_from_storage(session, logger, file_o._id)
+                                delete_from_collection(session, logger, recordResJSON)
+                            failLogger.info(i)
+                            failed_rows += 1
+                            logger.info(f"Завершено удаление данных по {i}")
+                            action = _operator_action_on_row_error(
+                                operator_mode=bool(args.operator_mode),
+                                interactive=interactive,
+                                logger=logger,
+                                context=f"workbook={workbook_path.name} sheet={list_name} row={i}: ошибка загрузки файла",
+                            )
+                            if action == "abort":
+                                stopped = True
+                                break
+                            continue
+                        if len(file_objects) > 0:
+                            updRecData = {
+                                "_id": record_id,
+                                "guid": record_guid,
+                                "parentEntries": recData['parentEntries'],
+                                "permission": {
+                                    "PermissionStatus": MAP_PERMISSION_STATUS[row.get("Статус разрешения").lower()],
+                                    "PermissionNumber": row.get("Номер разрешения"),
+                                    "PermissionStartDate": row.get("Дата выдачи разрешения"),
+                                    "administrationName": None,
+                                    "permissionEffectiveStartDate": row.get("Дата начала действия разрешения"),
+                                    "PermissionEndDate": row.get("Дата завершения действия разрешения"),
+                                    "permissionExtensionDate": row.get("Дата, до которой продлено действие разрешения"),
+                                    "reissuePermissionFile": file_objects[0]
+                                }
+                            }
+                            recordUpdURL = f"{get_runtime_base_url()}/api/v1/update/{recData['parentEntries']}?mainId={record_id}&guid={recordResJSON['guid']}"
+                            recUpdRes = api_request(session, logger, "put", recordUpdURL, json=jsonable(updRecData))
+                            if recUpdRes.status_code != requests.codes.ok:
+                                logger.info(f"Удаление данных по {i}")
+                                for file_o in file_objects:
+                                    delete_file_from_storage(session, logger, file_o["_id"])
+                                delete_from_collection(session, logger, recordResJSON)
+                                failLogger.info(i)
+                                failed_rows += 1
+                                logger.info(f"Завершено удаление данных по {i}")
+                                action = _operator_action_on_row_error(
+                                    operator_mode=bool(args.operator_mode),
+                                    interactive=interactive,
+                                    logger=logger,
+                                    context=f"workbook={workbook_path.name} sheet={list_name} row={i}: ошибка обновления записи",
+                                )
+                                if action == "abort":
+                                    stopped = True
+                                    break
+                                continue
+                    # Final log
+                    logger.info(f"Создана структура для строки {i} | _id записи - {record_id}")
+                    log_success(successLogger, {"_id": record_id, "guid": record_guid, "parentEntries": recData["parentEntries"]})
+
+                    if list_name == "3. Реестр рынков":
+                        local_payload = build_nsi_local_object_market_payload(row, unit, record_guid)
+                        localRecordURL = f"{get_runtime_base_url()}/api/v1/create/{NSI_LOCAL_OBJECT_MARKET_COLLECTION}"
+                        localRecordRes = api_request(session, logger, "post", localRecordURL, json=jsonable(local_payload))
+                        if not localRecordRes.ok:
+                            logger.error("Ошибка при создании записи в nsiLocalObjectMarket")
+                            failLogger.info(f"{list_name}:{i}:nsi")
+                            failed_rows += 1
+                            action = _operator_action_on_row_error(
+                                operator_mode=bool(args.operator_mode),
+                                interactive=interactive,
+                                logger=logger,
+                                context=f"workbook={workbook_path.name} sheet={list_name} row={i}: nsiLocalObjectMarket",
+                            )
+                            if action == "abort":
+                                stopped = True
+                                break
+                            continue
+                        localRecordJSON = localRecordRes.json()
+                        logger.info(
+                            f"Создана запись в {NSI_LOCAL_OBJECT_MARKET_COLLECTION} | "
+                            f"_id записи - {localRecordJSON.get('_id')}"
+                        )
+                        log_success(
+                            successLogger,
+                            {
+                                "_id": localRecordJSON.get("_id"),
+                                "guid": localRecordJSON.get("guid", local_payload["guid"]),
+                                "parentEntries": NSI_LOCAL_OBJECT_MARKET_COLLECTION
+                            }
+                        )
+                    state.mark_success(
+                        workbook_path=str(workbook_path),
+                        job_name=list_name,
+                        row_idx=i,
+                        collection=str(recData["parentEntries"]),
+                        main_id=str(record_id),
+                        guid=str(record_guid),
+                        had_errors=False,
+                        error_count=0,
                     )
-                state.mark_success(
-                    workbook_path=str(workbook_path),
-                    job_name=list_name,
-                    row_idx=i,
-                    collection=str(recData["parentEntries"]),
-                    main_id=str(record_id),
-                    guid=str(record_guid),
-                    had_errors=False,
-                    error_count=0,
-                )
-                created_rows += 1
-            logger.info(f"Р—Р°РІРµСЂС€РµРЅР° РѕР±СЂР°Р±РѕС‚РєР° Р»РёСЃС‚Р°: {list_name}")
-        logger.info("РћР±СЂР°Р±РѕС‚РєР° С„Р°Р№Р»Р° Р·Р°РІРµСЂС€РµРЅР°")
+                    created_rows += 1
+                    if stopped:
+                        logger.warning("Migration stopped on workbook=%s sheet=%s row=%s", workbook_path.name, list_name, i)
+                        break
+            logger.info(f"Завершена обработка листа: {list_name}")
+            if stopped:
+                break
+            logger.info("Обработка файла завершена")
+            if stopped:
+                break
 
     except KeyboardInterrupt:
         stopped = True
         logger.warning("Остановка по Ctrl+C")
     except Exception as e:
         fatal_error = True
-        logger.error(f"РћС€РёР±РєР° РІС‹РїРѕР»РЅРµРЅРёСЏ СЃРєСЂРёРїС‚Р°: {e}")
+        logger.error("Критическая ошибка выполнения: %s", e)
         logger.debug(traceback.format_exc())
     finally:
         summary = {
@@ -680,6 +1169,12 @@ def main():
             "createdRows": created_rows,
             "resumeSkips": resumed_skips,
             "failedRows": failed_rows,
+            "workbooks": len(workbook_specs),
+            "profile": profile_name,
+            "baseUrl": get_runtime_base_url(),
+            "mode": resolved_mode,
+            "dryRun": bool(args.dry_run),
+            "skipAuth": bool(skip_auth),
         }
         if stopped:
             status = "stopped"
