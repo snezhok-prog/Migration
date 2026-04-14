@@ -86,7 +86,16 @@ def _apply_token_headers(session: requests.Session, token: str) -> None:
     session.headers["Authorization"] = "Bearer " + clean
 
 
+def _normalize_raw_cookie_header(raw_cookie: str) -> str:
+    text = str(raw_cookie or "").replace("\ufeff", "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\s*cookie\s*:\s*", "", text, flags=re.IGNORECASE)
+    return text.replace("\r", " ").replace("\n", " ").strip()
+
+
 def _apply_cookie_pairs(session: requests.Session, cookie_raw: str, logger) -> int:
+    raw_cookie_header = _normalize_raw_cookie_header(cookie_raw)
     pairs = parse_cookie_pairs(cookie_raw)
     host_match = re.match(r"^https?://([^/:]+)", _RUNTIME_BASE_URL.strip(), flags=re.IGNORECASE)
     domain = host_match.group(1) if host_match else ""
@@ -97,26 +106,46 @@ def _apply_cookie_pairs(session: requests.Session, cookie_raw: str, logger) -> i
         else:
             session.cookies.set(name, value, path="/")
         parsed += 1
-    if parsed:
+    if raw_cookie_header:
+        # Keep original cookie string for PSI compatibility (long PLATFORM_SESSION chains).
+        session.headers["Cookie"] = raw_cookie_header
+    elif parsed:
         session.headers["Cookie"] = "; ".join([f"{k}={v}" for k, v in pairs])
     logger.info("Parsed cookie pairs: %s", parsed)
     return parsed
 
 
 def _auth_test(session: requests.Session, logger) -> bool:
-    body = {
-        "search": {"search": [{"andSubConditions": [{"field": "_id", "operator": "notNull"}]}]},
-        "limit": 1,
-        "offset": 0,
-    }
-    url = _build_url(f"/api/v1/search/{AUTH_TEST_COLLECTION}")
-    try:
-        resp = session.post(url, json=body, timeout=60)
-    except Exception as exc:
-        logger.warning("[AUTH TEST] request error: %s", exc)
-        return False
-    logger.info("[AUTH TEST] %s -> %s", url, resp.status_code)
-    return resp.status_code < 400
+    checks = [
+        (
+            _build_url(f"/api/v1/search/{AUTH_TEST_COLLECTION}"),
+            {
+                "search": {"search": [{"andSubConditions": [{"field": "_id", "operator": "notNull"}]}]},
+                "limit": 1,
+                "offset": 0,
+            },
+        ),
+        (_build_url("/api/v1/search/subservices"), {}),
+    ]
+    for auth_url, body in checks:
+        try:
+            resp = session.post(auth_url, json=body, timeout=60)
+        except Exception as exc:
+            logger.warning("[AUTH TEST] request error: %s (%s)", exc, auth_url)
+            continue
+        content_type = str(resp.headers.get("content-type") or "").lower()
+        logger.info("[AUTH TEST] POST %s -> %s | ct=%s", auth_url, resp.status_code, content_type)
+        if resp.status_code == 200 and "application/json" in content_type:
+            return True
+        preview = (resp.text or "").replace("\r", " ").replace("\n", " ").strip()[:500]
+        if preview:
+            logger.warning("[AUTH TEST] non-success response preview: %s", preview)
+    return False
+
+
+def _drop_token_headers(session: requests.Session) -> None:
+    session.headers.pop("token", None)
+    session.headers.pop("Authorization", None)
 
 
 def _save_auth_if_needed(session: requests.Session, token: str, logger) -> None:
@@ -219,6 +248,14 @@ def setup_session(logger, no_prompt: bool = False) -> requests.Session:
     if _auth_test(session, logger):
         _save_auth_if_needed(session, token, logger)
         return session
+
+    # Common PSI case: valid cookie + stale/foreign JWT from token.md.
+    if token and cookie_raw:
+        logger.warning("[AUTH] initial auth failed; retrying with cookie-only (without JWT headers)")
+        _drop_token_headers(session)
+        if _auth_test(session, logger):
+            _save_auth_if_needed(session, "", logger)
+            return session
 
     if _reauth_session(session, logger):
         return session

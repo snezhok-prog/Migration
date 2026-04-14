@@ -9,11 +9,11 @@ BASE_URL = "https://iam.torknd-customer.dev.pd15.digitalgov.mtp"
 UI_BASE_URL = BASE_URL
 VERIFY_SSL = False
 JWT_URL = BASE_URL.rstrip("/") + "/jwt/"
-AUTO_JWT = False
+AUTO_JWT = True
 SAVE_AUTH = False
 AUTH_TEST_COLLECTION = "organizations"
-REAUTH_ON_401 = False
-REAUTH_RETRIES = 1
+REAUTH_ON_401 = True
+REAUTH_RETRIES = 2
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FILES_DIR = os.path.join(SCRIPT_DIR, "files")
