@@ -1,25 +1,71 @@
 ﻿import copy
 import json
-import requests
 import os
 import mimetypes
 import re
+from typing import Optional
+
+import requests
 
 from pathlib import Path
-from _config import BASE_URL, APPEAL_SETTINGS, STANDARD_CODES, SCRIPT_DIR, TOKEN_FILE, COOKIE_FILE
-from _utils import (
-    jsonable,
-    generate_guid,
-    to_iso_date,
-    parse_date_to_birthday_obj,
-    format_phone,
-    format_multiple_phones,
-    read_file_as_base64,
-    make_boundary,
-    build_multipart_body,
-    find_file_in_dir,
-    find_document_group_by_mnemonic
+from _config import (
+    APPEAL_SETTINGS,
+    AUTH_TEST_COLLECTION,
+    BASE_URL,
+    COOKIE_FILE,
+    JWT_URL,
+    REAUTH_ON_401,
+    REAUTH_RETRIES,
+    SAVE_AUTH,
+    SCRIPT_DIR,
+    STANDARD_CODES,
+    TOKEN_FILE,
+    UI_BASE_URL,
+    VERIFY_SSL,
 )
+from _utils import jsonable, generate_guid
+
+
+_RUNTIME_BASE_URL = str(BASE_URL).rstrip("/")
+_RUNTIME_JWT_URL = str(JWT_URL or (str(BASE_URL).rstrip("/") + "/jwt/")).strip()
+_RUNTIME_UI_BASE_URL = str(UI_BASE_URL or BASE_URL).rstrip("/")
+
+
+def set_runtime_urls(base_url: Optional[str] = None, jwt_url: Optional[str] = None, ui_base_url: Optional[str] = None) -> None:
+    global _RUNTIME_BASE_URL, _RUNTIME_JWT_URL, _RUNTIME_UI_BASE_URL
+    if base_url:
+        _RUNTIME_BASE_URL = str(base_url).strip().rstrip("/")
+    if jwt_url:
+        _RUNTIME_JWT_URL = str(jwt_url).strip()
+    elif _RUNTIME_BASE_URL and not _RUNTIME_JWT_URL:
+        _RUNTIME_JWT_URL = _RUNTIME_BASE_URL.rstrip("/") + "/jwt/"
+    if ui_base_url:
+        _RUNTIME_UI_BASE_URL = str(ui_base_url).strip().rstrip("/")
+    elif base_url:
+        _RUNTIME_UI_BASE_URL = _RUNTIME_BASE_URL
+
+
+def get_runtime_base_url() -> str:
+    return _RUNTIME_BASE_URL
+
+
+def get_runtime_jwt_url() -> str:
+    return _RUNTIME_JWT_URL
+
+
+def get_runtime_ui_base_url() -> str:
+    return _RUNTIME_UI_BASE_URL
+
+
+def _build_url(path: str) -> str:
+    return _RUNTIME_BASE_URL + "/" + str(path or "").lstrip("/")
+
+
+def _safe_json(resp: requests.Response):
+    try:
+        return resp.json()
+    except Exception:
+        return resp.text
 
 
 def get_standard_code(key):
@@ -35,57 +81,57 @@ def upload_file(
     entity_field_path: str = ""
 ):
     """
-    РћР±СЏР·Р°С‚РµР»РµРЅ JWT С‚РѕРєРµРЅ, Р±РµР· РЅРµРіРѕ РЅРёС‡РµРіРѕ РЅРµ Р·Р°РіСЂСѓР·РёС‚СЃСЏ
+    Обязателен JWT токен, без него ничего не загрузится
     """
     file_name = os.path.basename(file_path)
-    url = f"{BASE_URL}/api/v1/storage/upload"
-    
-    # рџ”Ґ Р’РђР–РќРћ: РІСЃРµ РїРѕР»СЏ С„РѕСЂРјС‹ вЂ” РІ data, Р° РЅРµ РІ params!
+    url = _build_url("/api/v1/storage/upload")
+
+    # 🔥 ВАЖНО: все поля формы — в data, а не в params!
     data = {
-        'entryName': entry_name,      # в†ђ Р±С‹Р»Рѕ РІ params, С‚РµРїРµСЂСЊ Р·РґРµСЃСЊ
-        'entryId': entry_id,          # в†ђ Р±С‹Р»Рѕ РІ params, С‚РµРїРµСЂСЊ Р·РґРµСЃСЊ
+        'entryName': entry_name,      # ← было в params, теперь здесь
+        'entryId': entry_id,          # ← было в params, теперь здесь
         'entityFieldPath': entity_field_path,
         'allowExternal': 'false'
     }
-    
+
     if not os.path.isfile(file_path):
-        logger.error(f"Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ: {file_path}")
+        logger.error(f"Файл не найден: {file_path}")
         return None
-    
+
     if not file_name:#123
         file_name = Path(file_path).name
     mime_type, _ = mimetypes.guess_type(file_path)
     content_type = mime_type or "application/octet-stream"
-    
-    logger.info(f"РџРѕРґРіРѕС‚РѕРІРєР° Рє Р·Р°РіСЂСѓР·РєРµ: {file_name} ({content_type})")
-    
-    # РћР±РЅРѕРІР»СЏРµРј Referer РїРѕРґ РєРѕРЅРєСЂРµС‚РЅРѕРµ РґРµР»Рѕ
-    session.headers["Referer"] = f"{BASE_URL}/AppRKN034/common-appeals/edit/{entry_id}"
-    session.headers["Origin"] = BASE_URL
-    
+
+    logger.info(f"Подготовка к загрузке: {file_name} ({content_type})")
+
+    # Обновляем Referer под конкретное дело
+    session.headers["Referer"] = _RUNTIME_BASE_URL + f"/AppRKN034/common-appeals/edit/{entry_id}"
+    session.headers["Origin"] = _RUNTIME_BASE_URL
+
     try:
         with open(file_path, 'rb') as f:
             files = {'file': (file_name, f, content_type)}
-            
-            logger.debug(f"рџ”Ќ РћС‚РїСЂР°РІРєР°: url={url}, data={data}")
-            logger.debug(f"рџ”Ќ Cookies: {list(session.cookies.keys())}")
-            
-            # рџ”Ґ РЈР±РёСЂР°РµРј params= вЂ” РІСЃРµ РґР°РЅРЅС‹Рµ РІ С‚РµР»Рµ С„РѕСЂРјС‹
+
+            logger.debug(f"🔍 Отправка: url={url}, data={data}")
+            logger.debug(f"🔍 Cookies: {list(session.cookies.keys())}")
+
+            # 🔥 Убираем params= — все данные в теле формы
             response = api_request(session, logger, "post", url, files=files, data=data)
             # response = session.post(
             #     url,
             #     files=files,
-            #     data=data,  # в†ђ РІСЃРµ РїРѕР»СЏ С„РѕСЂРјС‹ Р·РґРµСЃСЊ
+            #     data=data,  # ← все поля формы здесь
             #     timeout=120
             # )
     except Exception as e:
-        logger.error(f"РћС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ: {type(e).__name__}: {e}")
+        logger.error(f"Ошибка при загрузке: {type(e).__name__}: {e}")
         return None
 
-    logger.info(f"Р—Р°РїСЂРѕСЃ Рє {url}, СЃС‚Р°С‚СѓСЃ: {response.status_code}")
-    
+    logger.info(f"Запрос к {url}, статус: {response.status_code}")
+
     if response.status_code not in (200, 201, 202):
-        logger.error(f"РћС€РёР±РєР° HTTP {response.status_code}: {response.text}")
+        logger.error(f"Ошибка HTTP {response.status_code}: {response.text}")
         return None
 
     try:
@@ -93,63 +139,63 @@ def upload_file(
     except requests.exceptions.JSONDecodeError:
         if response.status_code in (200, 201, 202) and not response.text.strip():
             return {"status": "uploaded", "fileName": file_name}
-        logger.error("РћС‚РІРµС‚ РЅРµ СЏРІР»СЏРµС‚СЃСЏ JSON")
+        logger.error("Ответ не является JSON")
         return None
 
     if isinstance(result, dict) and ("error" in result or result.get("success") is False):
-        logger.error(f"API РІРµСЂРЅСѓР»Рѕ РѕС€РёР±РєСѓ: {result}")
+        logger.error(f"API вернуло ошибку: {result}")
         return None
 
-    logger.info(f"вњ… Р¤Р°Р№Р» {file_name} Р·Р°РіСЂСѓР¶РµРЅ")
+    logger.info(f"✅ Файл {file_name} загружен")
     return result
 
 
 def delete_file_from_storage(session, logger, file_id: str):
     """
-    РЈРґР°Р»СЏРµС‚ С„Р°Р№Р» РёР· С…СЂР°РЅРёР»РёС‰Р° РїРѕ fileId.
-    
+    Удаляет файл из хранилища по fileId.
+
     Args:
-        session (requests.Session): РђРІС‚РѕСЂРёР·РѕРІР°РЅРЅР°СЏ СЃРµСЃСЃРёСЏ (СЃ РєСѓРєР°РјРё Рё С‚РѕРєРµРЅРѕРј)
-        logger (logging.Logger): Р›РѕРіРіРµСЂ
-        file_id (str): РРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ С„Р°Р№Р»Р° (РЅР°РїСЂРёРјРµСЂ, '6946daca2899a5480fe402dd')
-    
+        session (requests.Session): Авторизованная сессия (с куками и токеном)
+        logger (logging.Logger): Логгер
+        file_id (str): Идентификатор файла (например, '6946daca2899a5480fe402dd')
+
     Returns:
-        bool: True вЂ” РµСЃР»Рё СѓРґР°Р»РµРЅРёРµ РїСЂРѕС€Р»Рѕ СѓСЃРїРµС€РЅРѕ, False вЂ” РїСЂРё РѕС€РёР±РєРµ
+        bool: True — если удаление прошло успешно, False — при ошибке
     """
-    # РЈР±РёСЂР°РµРј РІРѕР·РјРѕР¶РЅС‹Рµ РїСЂРѕР±РµР»С‹ РІ file_id
+    # Убираем возможные пробелы в file_id
     file_id = file_id.strip()
-    
-    url = f"{BASE_URL}/api/v1/storage/remove"
+
+    url = _build_url("/api/v1/storage/remove")
     params = {"fileId": file_id}
-    
-    # РЇРІРЅРѕ СѓРєР°Р·С‹РІР°РµРј Р·Р°РіРѕР»РѕРІРєРё, РєР°Рє РІ fetch (С…РѕС‚СЏ session Рё С‚Р°Рє РѕС‚РїСЂР°РІРёС‚ РєСѓРєРё)
+
+    # Явно указываем заголовки, как в fetch (хотя session и так отправит куки)
     headers = {
         "accept": "application/hal+json",
         "content-type": "application/json"
     }
-    
-    logger.info(f"РЈРґР°Р»РµРЅРёРµ С„Р°Р№Р»Р° РёР· С…СЂР°РЅРёР»РёС‰Р°: fileId={file_id}")
-    
+
+    logger.info(f"Удаление файла из хранилища: fileId={file_id}")
+
     try:
         response = session.delete(url, params=params, headers=headers)
-        logger.info(f"РЎС‚Р°С‚СѓСЃ СѓРґР°Р»РµРЅРёСЏ С„Р°Р№Р»Р°: {response.status_code}")
-        
-        # РЈСЃРїРµС€РЅС‹Рµ СЃС‚Р°С‚СѓСЃС‹: 200, 204, РёРЅРѕРіРґР° 202
+        logger.info(f"Статус удаления файла: {response.status_code}")
+
+        # Успешные статусы: 200, 204, иногда 202
         if response.status_code in (200, 204, 202):
-            logger.info("вњ… Р¤Р°Р№Р» СѓСЃРїРµС€РЅРѕ СѓРґР°Р»С‘РЅ РёР· С…СЂР°РЅРёР»РёС‰Р°")
+            logger.info("✅ Файл успешно удалён из хранилища")
             return True
         else:
-            logger.error(f"вќЊ РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ С„Р°Р№Р»Р°: {response.status_code}")
-            logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {response.text[:500]}")
+            logger.error(f"❌ Ошибка удаления файла: {response.status_code}")
+            logger.error(f"Тело ответа: {response.text[:500]}")
             return False
-            
+
     except Exception as e:
-        logger.error(f"рџ”Ґ РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё СѓРґР°Р»РµРЅРёРё С„Р°Р№Р»Р°: {e}")
+        logger.error(f"🔥 Исключение при удалении файла: {e}")
         return False
 
 
 def api_request(session, logger, method, url, reauth_fn=None, max_retries=3, **kwargs):
-    """РЈРЅРёС„РёС†РёСЂРѕРІР°РЅРЅС‹Р№ Р·Р°РїСЂРѕСЃ Рє API СЃ РїРѕРІС‚РѕСЂРЅРѕР№ Р°РІС‚РѕСЂРёР·Р°С†РёРµР№ РЅР° 401/403/500."""
+    """Унифицированный запрос к API с повторной авторизацией на 401/403/500."""
     if reauth_fn is None:
         reauth_fn = lambda log: setup_session(log, no_prompt=True)
 
@@ -157,11 +203,11 @@ def api_request(session, logger, method, url, reauth_fn=None, max_retries=3, **k
         try:
             request_fn = getattr(session, method.lower(), None)
             if request_fn is None:
-                raise ValueError(f"РќРµРёР·РІРµСЃС‚РЅС‹Р№ HTTP РјРµС‚РѕРґ: {method}")
+                raise ValueError(f"Неизвестный HTTP метод: {method}")
 
             response = request_fn(url, **kwargs)
             if response.status_code in (401, 403) or response.status_code == 500 and method.lower() != "delete":
-                logger.warning(f"HTTP {response.status_code} РѕС‚ {url}. РџРѕРїС‹С‚РєР° СЂРµР°РІС‚РѕСЂРёР·Р°С†РёРё {attempt + 1}/{max_retries}")
+                logger.warning(f"HTTP {response.status_code} от {url}. Попытка реавторизации {attempt + 1}/{max_retries}")
                 if attempt < max_retries:
                     new_session = reauth_fn(logger)
                     if new_session is not None:
@@ -171,15 +217,15 @@ def api_request(session, logger, method, url, reauth_fn=None, max_retries=3, **k
                         session.auth = new_session.auth
                         continue
                 return response
-            
+
             return response
         except Exception as e:
-            logger.error(f"РћС€РёР±РєР° РІ api_request ({method.upper()} {url}): {e}")
+            logger.error(f"Ошибка в api_request ({method.upper()} {url}): {e}")
             if attempt < max_retries:
                 continue
             raise
 
-    raise RuntimeError("api_request: РёСЃС‡РµСЂРїР°РЅС‹ РїРѕРїС‹С‚РєРё")
+    raise RuntimeError("api_request: исчерпаны попытки")
 
 
 def _read_text_if_exists(path: Path) -> str:
@@ -197,7 +243,9 @@ def _extract_jwt(raw: str) -> str:
     m = re.search(r"([A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+)", text)
     if m:
         return m.group(1).strip()
-    return text
+    if re.fullmatch(r"[A-Za-z0-9._-]+", text):
+        return text
+    return ""
 
 
 def _parse_cookie_pairs(raw_cookie: str):
@@ -252,20 +300,23 @@ def setup_session(logger, no_prompt: bool = False):
         return None
 
     session = requests.Session()
-    session.verify = False
+    session.verify = VERIFY_SSL
     session.headers.update(
         {
             "Accept": "application/json, text/plain, */*",
-            "Origin": BASE_URL,
-            "Referer": BASE_URL.rstrip("/") + "/",
+            "Origin": _RUNTIME_BASE_URL,
+            "Referer": _RUNTIME_BASE_URL.rstrip("/") + "/",
             "User-Agent": "Mozilla/5.0",
         }
     )
 
-    host_match = re.match(r"^https?://([^/:]+)", BASE_URL.strip(), flags=re.IGNORECASE)
+    host_match = re.match(r"^https?://([^/:]+)", _RUNTIME_BASE_URL.strip(), flags=re.IGNORECASE)
     domain = host_match.group(1) if host_match else ""
 
     pairs = _parse_cookie_pairs(cookie_header)
+    if not pairs:
+        logger.error("Cookie не распознан: проверьте содержимое cookie.md или ввод в консоли")
+        return None
     for name, value in pairs:
         if domain:
             session.cookies.set(name, value, domain=domain, path="/")
@@ -284,7 +335,7 @@ def setup_session(logger, no_prompt: bool = False):
     if xsrf and "X-XSRF-TOKEN" not in session.headers:
         session.headers["X-XSRF-TOKEN"] = xsrf
 
-    test_url = f"{BASE_URL}/api/v1/search/subservices"
+    test_url = _build_url("/api/v1/search/subservices")
     try:
         r = session.post(test_url, json={})
         logger.info(f"[AUTH TEST] POST {test_url} -> {r.status_code} | ct={r.headers.get('content-type')}")
@@ -321,27 +372,27 @@ def get_subservices(session, logger):
         },
         "sort": "serviceCode,DESC"
     }
-    url = f"{BASE_URL}/api/v1/search/subservices"
+    url = _build_url("/api/v1/search/subservices")
     response = api_request(session, logger, "post", url, json=search_data, max_retries=1)
 
-    logger.info(f"Р—Р°РїСЂРѕСЃ Рє {url}, СЃС‚Р°С‚СѓСЃ: {response.status_code}")
-    logger.debug(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {response.text[:500]}")
+    logger.info(f"Запрос к {url}, статус: {response.status_code}")
+    logger.debug(f"Тело ответа: {response.text[:500]}")
 
     if response.status_code != 200:
-        logger.error(f"РћС€РёР±РєР° HTTP {response.status_code}: {response.text}")
+        logger.error(f"Ошибка HTTP {response.status_code}: {response.text}")
         return None
 
     try:
         result = response.json()
     except requests.exceptions.JSONDecodeError:
-        logger.error("РћС‚РІРµС‚ РЅРµ СЏРІР»СЏРµС‚СЃСЏ JSON. Р’РѕР·РјРѕР¶РЅРѕ, РїСЂРѕР±Р»РµРјР° СЃ Р°РІС‚РѕСЂРёР·Р°С†РёРµР№ РёР»Рё URL.")
-        logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р° (РїРµСЂРІС‹Рµ 500 СЃРёРјРІРѕР»РѕРІ): {response.text[:500]}")
+        logger.error("Ответ не является JSON. Возможно, проблема с авторизацией или URL.")
+        logger.error(f"Тело ответа (первые 500 символов): {response.text[:500]}")
         return None
 
     if "content" in result and len(result["content"]) > 0:
         return result["content"]
 
-    logger.warning("РћС‚РІРµС‚ РЅРµ СЃРѕРґРµСЂР¶РёС‚ РґР°РЅРЅС‹С… (РїРѕР»Рµ 'content' РїСѓСЃС‚Рѕ РёР»Рё РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚)")
+    logger.warning("Ответ не содержит данных (поле 'content' пусто или отсутствует)")
     return None
 
 
@@ -360,7 +411,7 @@ def get_unit(session, params, logger):
             "value": v
         })
 
-    response = api_request(session, logger, "post", f"{BASE_URL}/api/v1/search/organizations", json=search_org, max_retries=1)
+    response = api_request(session, logger, "post", _build_url("/api/v1/search/organizations"), json=search_org, max_retries=1)
     if response.status_code != 200:
         return None
 
@@ -463,28 +514,28 @@ def create_subject_data(template, data=None):
 
 
 def create_appeal_with_entities(session, logger, appeal_data, subservice_data=None, subject_data=None, document_data=None, files_contents=None):
-    appeal_url = f"{BASE_URL}/api/v1/create/{APPEAL_SETTINGS['parentEntries']}"
+    appeal_url = _build_url(f"/api/v1/create/{APPEAL_SETTINGS['parentEntries']}")
 
     try:
-        logger.info("РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° СЃРѕР·РґР°РЅРёРµ РѕР±СЂР°С‰РµРЅРёСЏ...")
+        logger.info("Отправка запроса на создание обращения...")
         appeal_response = api_request(session, logger, "post", appeal_url, json=jsonable(appeal_data), max_retries=1)
 
         if appeal_response.status_code not in (200, 201):
-            logger.error(f"РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ РѕР±СЂР°С‰РµРЅРёСЏ: {appeal_response.status_code}")
-            logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {appeal_response.text[:500]}")
+            logger.error(f"Ошибка создания обращения: {appeal_response.status_code}")
+            logger.error(f"Тело ответа: {appeal_response.text[:500]}")
             return False, None, None, None, None
 
         appeal = appeal_response.json()
-        logger.info(f"вњ… РћР±СЂР°С‰РµРЅРёРµ СЃРѕР·РґР°РЅРѕ. ID: {appeal.get('_id')}, GUID: {appeal.get('guid')}")
+        logger.info(f"✅ Обращение создано. ID: {appeal.get('_id')}, GUID: {appeal.get('guid')}")
     except Exception as e:
-        logger.error(f"РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё СЃРѕР·РґР°РЅРёРё РѕР±СЂР°С‰РµРЅРёСЏ: {e}")
+        logger.error(f"Исключение при создании обращения: {e}")
         return False, None, None, None, None
 
     appeal_id = appeal.get("_id")
     appeal_guid = appeal.get("guid")
 
     if not appeal_id or not appeal_guid:
-        logger.error("РћС‚РІРµС‚ РѕС‚ СЃРѕР·РґР°РЅРёСЏ РѕР±СЂР°С‰РµРЅРёСЏ РЅРµ СЃРѕРґРµСЂР¶РёС‚ _id РёР»Рё guid")
+        logger.error("Ответ от создания обращения не содержит _id или guid")
         return False, appeal, None, None, None
 
     subservice = None
@@ -493,68 +544,72 @@ def create_appeal_with_entities(session, logger, appeal_data, subservice_data=No
 
     if subservice_data is not None:
         subservice_url = (
-            f"{BASE_URL}/api/v1/create/{APPEAL_SETTINGS['parentEntries']}/subservices"
+            _build_url(f"/api/v1/create/{APPEAL_SETTINGS['parentEntries']}/subservices")
+            +
             f"?mainId={appeal_id}&parentGuid={appeal_guid}&parentEntries={APPEAL_SETTINGS['parentEntries']}.subservices"
         )
 
         try:
-            logger.info("РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° СЃРѕР·РґР°РЅРёРµ subservice...")
+            logger.info("Отправка запроса на создание subservice...")
             subservice_response = api_request(session, logger, "post", subservice_url, json=jsonable(subservice_data), max_retries=1)
             if subservice_response.status_code not in (200, 201):
-                logger.error(f"РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ subservice: {subservice_response.status_code}")
-                logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {subservice_response.text[:500]}")
+                logger.error(f"Ошибка создания subservice: {subservice_response.status_code}")
+                logger.error(f"Тело ответа: {subservice_response.text[:500]}")
                 return False, appeal, None, None, None
 
             subservice = subservice_response.json()
-            logger.info("вњ… Subservice СѓСЃРїРµС€РЅРѕ СЃРѕР·РґР°РЅ")
+            logger.info("✅ Subservice успешно создан")
         except Exception as e:
-            logger.error(f"РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё СЃРѕР·РґР°РЅРёРё subservice: {e}")
+            logger.error(f"Исключение при создании subservice: {e}")
             return False, appeal, None, None, None
 
     if subject_data is not None:
         subject_url = (
-            f"{BASE_URL}/api/v1/create/{APPEAL_SETTINGS['parentEntries']}/subjects"
+            _build_url(f"/api/v1/create/{APPEAL_SETTINGS['parentEntries']}/subjects")
+            +
             f"?mainId={appeal_id}&parentGuid={appeal_guid}&parentEntries={APPEAL_SETTINGS['parentEntries']}.subjects"
         )
         try:
-            logger.info("РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° СЃРѕР·РґР°РЅРёРµ subject...")
+            logger.info("Отправка запроса на создание subject...")
             subject_response = api_request(session, logger, "post", subject_url, json=jsonable(subject_data), max_retries=1)
 
             if subject_response.status_code not in (200, 201):
-                logger.error(f"РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ subject: {subject_response.status_code}")
-                logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {subject_response.text[:500]}")
+                logger.error(f"Ошибка создания subject: {subject_response.status_code}")
+                logger.error(f"Тело ответа: {subject_response.text[:500]}")
                 return False, appeal, subservice, None, None
 
             subject = subject_response.json()
-            logger.info("вњ… Subject СѓСЃРїРµС€РЅРѕ СЃРѕР·РґР°РЅ")
+            logger.info("✅ Subject успешно создан")
         except Exception as e:
-            logger.error(f"РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё СЃРѕР·РґР°РЅРёРё subject: {e}")
+            logger.error(f"Исключение при создании subject: {e}")
             return False, appeal, subservice, None, None
 
     if document_data is not None:
         document_data["subserviceGuid"] = subservice.get("guid") if subservice else None
         document_url = (
-            f"{BASE_URL}/api/v1/create/{APPEAL_SETTINGS['parentEntries']}/documents"
+            _build_url(f"/api/v1/create/{APPEAL_SETTINGS['parentEntries']}/documents")
+            +
             f"?mainId={appeal_id}&parentGuid={appeal_guid}&parentEntries={APPEAL_SETTINGS['parentEntries']}.documents"
         )
         try:
-            logger.info("РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° СЃРѕР·РґР°РЅРёРµ document...")
+            logger.info("Отправка запроса на создание document...")
             document_response = api_request(session, logger, "post", document_url, json=jsonable(document_data), max_retries=1)
 
             if document_response.status_code not in (200, 201):
-                logger.error(f"РћС€РёР±РєР° СЃРѕР·РґР°РЅРёСЏ document: {document_response.status_code}")
-                logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {document_response.text[:500]}")
+                logger.error(f"Ошибка создания document: {document_response.status_code}")
+                logger.error(f"Тело ответа: {document_response.text[:500]}")
                 return False, appeal, subservice, subject, None
 
             document = document_response.json()
-            logger.info("вњ… Document СѓСЃРїРµС€РЅРѕ СЃРѕР·РґР°РЅ")
+            logger.info("✅ Document успешно создан")
         except Exception as e:
-            logger.error(f"РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё СЃРѕР·РґР°РЅРёРё document: {e}")
+            logger.error(f"Исключение при создании document: {e}")
             return False, appeal, subservice, subject, None
 
     if files_contents is not None and document is not None:
         document_url = (
-            f"{BASE_URL}/api/v1/update/{APPEAL_SETTINGS['parentEntries']}/documents"
+            _build_url(f"/api/v1/update/{APPEAL_SETTINGS['parentEntries']}/documents")
+            +
             f"?mainId={appeal_id}&guid={document['guid']}&parentEntries={APPEAL_SETTINGS['parentEntries']}.documents"
         )
         try:
@@ -582,18 +637,18 @@ def create_appeal_with_entities(session, logger, appeal_data, subservice_data=No
                 return False, appeal, subservice, subject, document
 
             document["files"] = file_metas
-            logger.info("РћС‚РїСЂР°РІРєР° Р·Р°РїСЂРѕСЃР° РЅР° РґРѕР±Р°РІР»РµРЅРёРµ РІ document files...")
+            logger.info("Отправка запроса на добавление в document files...")
             document_response = api_request(session, logger, "put", document_url, json=jsonable(document), max_retries=1)
 
             if document_response.status_code not in (200, 201):
-                logger.error(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ document: {document_response.status_code}")
-                logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {document_response.text[:500]}")
+                logger.error(f"Ошибка обновления document: {document_response.status_code}")
+                logger.error(f"Тело ответа: {document_response.text[:500]}")
                 return False, appeal, subservice, subject, document
 
             document = document_response.json()
-            logger.info("вњ… Р¤Р°Р№Р»С‹ СѓСЃРїРµС€РЅРѕ РґРѕР±Р°РІР»РµРЅС‹ РІ document")
+            logger.info("✅ Файлы успешно добавлены в document")
         except Exception as e:
-            logger.error(f"РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё document: {e}")
+            logger.error(f"Исключение при обновлении document: {e}")
             return False, appeal, subservice, subject, document
 
     return True, appeal, subservice, subject, document
@@ -601,7 +656,7 @@ def create_appeal_with_entities(session, logger, appeal_data, subservice_data=No
 
 def delete_from_collection(session, logger, data):
     """
-    РЈРЅРёРІРµСЂСЃР°Р»СЊРЅРѕРµ СѓРґР°Р»РµРЅРёРµ Р·Р°РїРёСЃРё РёР· РєРѕР»Р»РµРєС†РёРё
+    Универсальное удаление записи из коллекции
     data = {
         "_id": ...,
         "guid": ...,
@@ -614,26 +669,26 @@ def delete_from_collection(session, logger, data):
     parent_entries = data.get("parentEntries")
 
     if not main_id or not guid or not parent_entries:
-        logger.error(f"вќЊ РќРµРІРѕР·РјРѕР¶РЅРѕ СѓРґР°Р»РёС‚СЊ: РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚ _id, guid РёР»Рё parent_entries РІ РґР°РЅРЅС‹С… РґР»СЏ РєРѕР»Р»РµРєС†РёРё")
+        logger.error(f"❌ Невозможно удалить: отсутствует _id, guid или parent_entries в данных для коллекции")
         return False
 
-    url = f"{BASE_URL}/api/v1/delete/{parent_entries}?mainId={main_id}&guid={guid}"
+    url = _build_url(f"/api/v1/delete/{parent_entries}?mainId={main_id}&guid={guid}")
     try:
-        logger.info(f"РћС‚РїСЂР°РІРєР° DELETE-Р·Р°РїСЂРѕСЃР° РґР»СЏ {parent_entries} вЂ” _id: {main_id}, guid: {guid}")
+        logger.info(f"Отправка DELETE-запроса для {parent_entries} — _id: {main_id}, guid: {guid}")
         response = api_request(session, logger, "delete", url, max_retries=1)
 
         if response.status_code in (200, 204, 202):
-            logger.info(f"вњ… Р—Р°РїРёСЃСЊ СѓСЃРїРµС€РЅРѕ СѓРґР°Р»РµРЅР°: {parent_entries} вЂ” {main_id} ({guid})")
+            logger.info(f"✅ Запись успешно удалена: {parent_entries} — {main_id} ({guid})")
             return True
         if response.status_code == 404 or response.status_code == 500:
-            logger.info(f"в„№пёЏ Р—Р°РїРёСЃСЊ РЅРµ РЅР°Р№РґРµРЅР° (РІРѕР·РјРѕР¶РЅРѕ, СѓР¶Рµ СѓРґР°Р»РµРЅР°): {parent_entries} вЂ” {main_id} ({guid})")
+            logger.info(f"ℹ️ Запись не найдена (возможно, уже удалена): {parent_entries} — {main_id} ({guid})")
             return True
 
-        logger.error(f"вќЊ РћС€РёР±РєР° СѓРґР°Р»РµРЅРёСЏ: СЃС‚Р°С‚СѓСЃ {response.status_code}")
-        logger.error(f"РўРµР»Рѕ РѕС‚РІРµС‚Р°: {response.text[:500]}")
+        logger.error(f"❌ Ошибка удаления: статус {response.status_code}")
+        logger.error(f"Тело ответа: {response.text[:500]}")
         return False
 
     except Exception as e:
-        logger.error(f"вќЊ РСЃРєР»СЋС‡РµРЅРёРµ РїСЂРё СѓРґР°Р»РµРЅРёРё РёР· {parent_entries}: {e}")
+        logger.error(f"❌ Исключение при удалении из {parent_entries}: {e}")
         return False
 

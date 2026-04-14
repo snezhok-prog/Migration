@@ -1,12 +1,14 @@
-﻿import argparse
+import argparse
 import copy
 import json
 import os
 import re
-import sys
 import traceback
 import warnings
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from urllib3.exceptions import InsecureRequestWarning
@@ -15,35 +17,50 @@ from _api import (
     api_request,
     delete_file_from_storage,
     delete_from_collection,
+    get_runtime_base_url,
+    get_runtime_ui_base_url,
+    set_runtime_urls,
     setup_session,
     upload_file,
 )
 from _config import (
     BASE_URL,
     EXCEL_FILE_NAME,
+    EXCEL_INPUT_GLOB,
     EXCEL_LISTS,
     FAIR_COLLECTION,
     FAIR_MESTO_COLLECTION,
     FAIR_PERMITS_COLLECTION,
     FILES_DIR,
+    JWT_URL,
     RECORDS_TEMPLATES,
     RESUME_BY_DEFAULT,
     SCRIPT_DIR,
     STATE_FILE,
     TEST,
+    UI_BASE_URL,
     UNIT,
 )
+from _excel_input import discover_excel_files
 from _logger import setup_fail_logger, setup_logger, setup_success_logger, setup_user_logger
+from _profiles import PROFILES
 from _state import ResumeState
-from _utils import find_file_in_dir, generate_guid, jsonable, read_excel
+from _utils import (
+    find_file_in_dir,
+    generate_guid,
+    jsonable,
+    parse_key_value_mapping,
+    parse_path_list,
+    read_excel,
+)
 
 
 NSI_LOCAL_OBJECT_FAIR_COLLECTION = "nsiLocalObjectFair"
 DEFAULT_ORG = copy.deepcopy(UNIT)
 
-SHEET_FAIR = "4. Р РµРµСЃС‚СЂ СЏСЂРјР°СЂРѕРє"
-SHEET_MESTO = "2. Р РµРµСЃС‚СЂ РјРµСЃС‚"
-SHEET_PERMITS = "3. Р РµРµСЃС‚СЂ СЂР°Р·СЂРµС€РµРЅРёР№"
+SHEET_FAIR = "4. Реестр ярмарок"
+SHEET_MESTO = "2. Реестр мест"
+SHEET_PERMITS = "3. Реестр разрешений"
 
 
 def norm_str(value):
@@ -105,7 +122,7 @@ def has_any_non_null(obj):
 def parse_bool(value):
     if isinstance(value, bool):
         return value
-    return norm_key(value) in {"РґР°", "true", "1", "yes", "y"}
+    return norm_key(value) in {"да", "true", "1", "yes", "y"}
 
 
 def pad2(value):
@@ -226,39 +243,39 @@ def latin_key(text, to_lower=True):
     if not text:
         return ""
     translit = {
-        "Р°": "a",
-        "Р±": "b",
-        "РІ": "v",
-        "Рі": "g",
-        "Рґ": "d",
-        "Рµ": "e",
-        "С‘": "e",
-        "Р¶": "zh",
-        "Р·": "z",
-        "Рё": "i",
-        "Р№": "y",
-        "Рє": "k",
-        "Р»": "l",
-        "Рј": "m",
-        "РЅ": "n",
-        "Рѕ": "o",
-        "Рї": "p",
-        "СЂ": "r",
-        "СЃ": "s",
-        "С‚": "t",
-        "Сѓ": "u",
-        "С„": "f",
-        "С…": "kh",
-        "С†": "ts",
-        "С‡": "ch",
-        "С€": "sh",
-        "С‰": "shch",
-        "СЉ": "",
-        "С‹": "y",
-        "СЊ": "",
-        "СЌ": "e",
-        "СЋ": "yu",
-        "СЏ": "ya",
+        "а": "a",
+        "б": "b",
+        "в": "v",
+        "г": "g",
+        "д": "d",
+        "е": "e",
+        "ё": "e",
+        "ж": "zh",
+        "з": "z",
+        "и": "i",
+        "й": "y",
+        "к": "k",
+        "л": "l",
+        "м": "m",
+        "н": "n",
+        "о": "o",
+        "п": "p",
+        "р": "r",
+        "с": "s",
+        "т": "t",
+        "у": "u",
+        "ф": "f",
+        "х": "kh",
+        "ц": "ts",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "shch",
+        "ъ": "",
+        "ы": "y",
+        "ь": "",
+        "э": "e",
+        "ю": "yu",
+        "я": "ya",
     }
     text = "".join(translit.get(ch.lower(), ch) for ch in str(text))
     text = re.sub(r"[\s\-.(),/]+", "_", text)
@@ -267,8 +284,8 @@ def latin_key(text, to_lower=True):
 
 
 MAP_MARKET_TYPE = {
-    "specialized": {"code": "specialized", "name": "РЎРїРµС†РёР°Р»РёР·РёСЂРѕРІР°РЅРЅР°СЏ"},
-    "universal": {"code": "universal", "name": "РЈРЅРёРІРµСЂСЃР°Р»СЊРЅР°СЏ"},
+    "specialized": {"code": "specialized", "name": "Специализированная"},
+    "universal": {"code": "universal", "name": "Универсальная"},
 }
 
 
@@ -277,22 +294,22 @@ def map_market_type(value):
     if not raw:
         return None
     key = norm_key(raw)
-    if key in {"specialized", norm_key("РЎРїРµС†РёР°Р»РёР·РёСЂРѕРІР°РЅРЅР°СЏ")}:
+    if key in {"specialized", norm_key("Специализированная")}:
         return MAP_MARKET_TYPE["specialized"]
-    if key in {"universal", norm_key("РЈРЅРёРІРµСЂСЃР°Р»СЊРЅР°СЏ")}:
+    if key in {"universal", norm_key("Универсальная")}:
         return MAP_MARKET_TYPE["universal"]
     return {"code": None, "name": raw}
 
 
 MAP_MARKET_SPEC = {
-    "agricultural": {"code": "agricultural", "name": "РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅР°СЏ"},
-    "fleaMarkets": {"code": "fleaMarkets", "name": "Р‘Р»РѕС€РёРЅС‹Рµ СЂС‹РЅРєРё"},
-    "food": {"code": "food", "name": "РџСЂРѕРґРѕРІРѕР»СЊСЃС‚РІРµРЅРЅР°СЏ"},
-    "industrial": {"code": "industrial", "name": "РџСЂРѕРјС‹С€Р»РµРЅРЅР°СЏ"},
-    "other": {"code": "other", "name": "РРЅР°СЏ"},
-    "specializedSales": {"code": "specializedSales", "name": "РџСЂРѕРґР°Р¶Р° РѕРїСЂРµРґРµР»РµРЅРЅРѕРіРѕ РІРёРґР° С‚РѕРІР°СЂРѕРІ"},
-    "vernissage": {"code": "vernissage", "name": "Р’РµСЂРЅРёСЃР°Р¶"},
-    "winery": {"code": "winery", "name": "Р’РёРЅРѕРґРµР»СЊС‡РµСЃРєР°СЏ РїСЂРѕРґСѓРєС†РёСЏ"},
+    "agricultural": {"code": "agricultural", "name": "Сельскохозяйственная"},
+    "fleaMarkets": {"code": "fleaMarkets", "name": "Блошиные рынки"},
+    "food": {"code": "food", "name": "Продовольственная"},
+    "industrial": {"code": "industrial", "name": "Промышленная"},
+    "other": {"code": "other", "name": "ная"},
+    "specializedSales": {"code": "specializedSales", "name": "Продажа определенного вида товаров"},
+    "vernissage": {"code": "vernissage", "name": "Вернисаж"},
+    "winery": {"code": "winery", "name": "Винодельческая продукция"},
 }
 
 
@@ -302,39 +319,39 @@ def map_market_specialization(value):
         return None
     key = norm_key(raw)
     ru_to_code = [
-        ("РЎРµР»СЊСЃРєРѕС…РѕР·СЏР№СЃС‚РІРµРЅРЅР°СЏ", "agricultural"),
-        ("Р‘Р»РѕС€РёРЅС‹Рµ СЂС‹РЅРєРё", "fleaMarkets"),
-        ("РџСЂРѕРґРѕРІРѕР»СЊСЃС‚РІРµРЅРЅР°СЏ", "food"),
-        ("РџСЂРѕРјС‹С€Р»РµРЅРЅР°СЏ", "industrial"),
-        ("РРЅР°СЏ", "other"),
-        ("РџСЂРѕРґР°Р¶Р° РѕРїСЂРµРґРµР»РµРЅРЅРѕРіРѕ РІРёРґР° С‚РѕРІР°СЂРѕРІ", "specializedSales"),
-        ("Р’РµСЂРЅРёСЃР°Р¶", "vernissage"),
-        ("Р’РёРЅРѕРґРµР»СЊС‡РµСЃРєР°СЏ РїСЂРѕРґСѓРєС†РёСЏ", "winery"),
+        ("Сельскохозяйственная", "agricultural"),
+        ("Блошиные рынки", "fleaMarkets"),
+        ("Продовольственная", "food"),
+        ("Промышленная", "industrial"),
+        ("ная", "other"),
+        ("Продажа определенного вида товаров", "specializedSales"),
+        ("Вернисаж", "vernissage"),
+        ("Винодельческая продукция", "winery"),
     ]
     for ru_name, code in ru_to_code:
         if key == norm_key(ru_name):
             return MAP_MARKET_SPEC[code]
-    if "СЃРµР»СЊСЃРєРѕС…" in key:
+    if "сельскох" in key:
         return MAP_MARKET_SPEC["agricultural"]
-    if "Р±Р»РѕС€" in key:
+    if "блош" in key:
         return MAP_MARKET_SPEC["fleaMarkets"]
-    if "РїСЂРѕРґРѕРІ" in key:
+    if "продов" in key:
         return MAP_MARKET_SPEC["food"]
-    if "РїСЂРѕРјС‹С€" in key:
+    if "промыш" in key:
         return MAP_MARKET_SPEC["industrial"]
-    if "РІРµСЂРЅРёСЃР°Р¶" in key:
+    if "вернисаж" in key:
         return MAP_MARKET_SPEC["vernissage"]
-    if "РІРёРЅРѕРґ" in key:
+    if "винод" in key:
         return MAP_MARKET_SPEC["winery"]
-    if "РёРЅР°СЏ" in key:
+    if "иная" in key:
         return MAP_MARKET_SPEC["other"]
     return {"code": None, "name": raw}
 
 
 MAP_STATUS_FAIR_PLACE = {
-    "approved": {"code": "approved", "name": "РЈС‚РІРµСЂР¶РґРµРЅРѕ"},
-    "draft": {"code": "draft", "name": "Р§РµСЂРЅРѕРІРёРє"},
-    "liquid": {"code": "liquid", "name": "Р›РёРєРІРёРґРёСЂРѕРІР°РЅРѕ"},
+    "approved": {"code": "approved", "name": "Утверждено"},
+    "draft": {"code": "draft", "name": "Черновик"},
+    "liquid": {"code": "liquid", "name": "Ликвидировано"},
 }
 
 
@@ -343,20 +360,20 @@ def map_status_fair_place(value):
     if not raw:
         return None
     key = norm_key(raw)
-    if key == norm_key("РЈС‚РІРµСЂР¶РґРµРЅРѕ"):
+    if key == norm_key("Утверждено"):
         return MAP_STATUS_FAIR_PLACE["approved"]
-    if key == norm_key("Р§РµСЂРЅРѕРІРёРє"):
+    if key == norm_key("Черновик"):
         return MAP_STATUS_FAIR_PLACE["draft"]
-    if key == norm_key("Р›РёРєРІРёРґРёСЂРѕРІР°РЅРѕ"):
+    if key == norm_key("Ликвидировано"):
         return MAP_STATUS_FAIR_PLACE["liquid"]
     return {"code": None, "name": raw}
 
 
 MAP_STATUS_FAIR_PLACE_SPECIFIC = {
-    "approvedFree": {"code": "approvedFree", "name": "РЎРІРѕР±РѕРґРЅРѕ", "parentCode": "approved"},
-    "approvedUsed": {"code": "approvedUsed", "name": "РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ", "parentCode": "approved"},
-    "draftApplicant": {"code": "draftApplicant", "name": "РџСЂРµРґР»РѕР¶РµРЅРѕ Р·Р°СЏРІРёС‚РµР»РµРј", "parentCode": "draft"},
-    "draftMun": {"code": "draftMun", "name": "РџСЂРµРґР»РѕР¶РµРЅРѕ РјСѓРЅРёС†РёРїР°Р»РёС‚РµС‚РѕРј", "parentCode": "draft"},
+    "approvedFree": {"code": "approvedFree", "name": "Свободно", "parentCode": "approved"},
+    "approvedUsed": {"code": "approvedUsed", "name": "спользуется", "parentCode": "approved"},
+    "draftApplicant": {"code": "draftApplicant", "name": "Предложено заявителем", "parentCode": "draft"},
+    "draftMun": {"code": "draftMun", "name": "Предложено муниципалитетом", "parentCode": "draft"},
 }
 
 
@@ -365,25 +382,25 @@ def map_status_fair_place_specific(value, status_fair_place):
     if not raw:
         return None
     key = norm_key(raw)
-    if key == norm_key("РЎРІРѕР±РѕРґРЅРѕ"):
+    if key == norm_key("Свободно"):
         return MAP_STATUS_FAIR_PLACE_SPECIFIC["approvedFree"]
-    if key == norm_key("РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ"):
+    if key == norm_key("спользуется"):
         return MAP_STATUS_FAIR_PLACE_SPECIFIC["approvedUsed"]
-    if key == norm_key("РџСЂРµРґР»РѕР¶РµРЅРѕ Р·Р°СЏРІРёС‚РµР»РµРј"):
+    if key == norm_key("Предложено заявителем"):
         return MAP_STATUS_FAIR_PLACE_SPECIFIC["draftApplicant"]
-    if key == norm_key("РџСЂРµРґР»РѕР¶РµРЅРѕ РјСѓРЅРёС†РёРїР°Р»РёС‚РµС‚РѕРј"):
+    if key == norm_key("Предложено муниципалитетом"):
         return MAP_STATUS_FAIR_PLACE_SPECIFIC["draftMun"]
     parent_code = status_fair_place.get("code") if status_fair_place else None
     return {"code": None, "name": raw, "parentCode": parent_code}
 
 
 MAP_MARKET_STATUS = {
-    "Р°РєС‚РёРІРЅР°": {"code": "active", "name": "РђРєС‚РёРІРЅР°"},
-    "РґРµР№СЃС‚РІСѓРµС‚": {"code": "active", "name": "Р”РµР№СЃС‚РІСѓРµС‚"},
-    "РѕС‚РјРµРЅРµРЅР°": {"code": "cancelled", "name": "РћС‚РјРµРЅРµРЅР°"},
-    "С‡РµСЂРЅРѕРІРёРє": {"code": "draft", "name": "Р§РµСЂРЅРѕРІРёРє"},
-    "Р·Р°РІРµСЂС€РµРЅР°": {"code": "finished", "name": "Р—Р°РІРµСЂС€РµРЅР°"},
-    "Р·Р°РїР»Р°РЅРёСЂРѕРІР°РЅР°": {"code": "planned", "name": "Р—Р°РїР»Р°РЅРёСЂРѕРІР°РЅР°"},
+    "активна": {"code": "active", "name": "Активна"},
+    "действует": {"code": "active", "name": "Действует"},
+    "отменена": {"code": "cancelled", "name": "Отменена"},
+    "черновик": {"code": "draft", "name": "Черновик"},
+    "завершена": {"code": "finished", "name": "Завершена"},
+    "запланирована": {"code": "planned", "name": "Запланирована"},
 }
 
 
@@ -395,8 +412,8 @@ def map_market_status(value):
 
 
 MAP_MARKET_FREQUENCY_PARENT = {
-    "СЂРµРіСѓР»СЏСЂРЅР°СЏ": {"code": "regular", "name": "Р РµРіСѓР»СЏСЂРЅР°СЏ"},
-    "СЂР°Р·РѕРІР°СЏ": {"code": "single", "name": "Р Р°Р·РѕРІР°СЏ"},
+    "регулярная": {"code": "regular", "name": "Регулярная"},
+    "разовая": {"code": "single", "name": "Разовая"},
 }
 
 
@@ -408,16 +425,16 @@ def map_market_frequency_parent(value):
 
 
 MAP_MARKET_VARIATION_REGULAR = {
-    "РїРѕСЃС‚РѕСЏРЅРЅРѕ РґРµР№СЃС‚РІСѓСЋС‰Р°СЏ": {"code": "regularPermanent", "name": "РџРѕСЃС‚РѕСЏРЅРЅРѕ РґРµР№СЃС‚РІСѓСЋС‰Р°СЏ", "parentCode": "regular"},
-    "СЃРµР·РѕРЅРЅР°СЏ": {"code": "regularSeasonal", "name": "РЎРµР·РѕРЅРЅР°СЏ", "parentCode": "regular"},
-    "РІС‹С…РѕРґРЅРѕРіРѕ РґРЅСЏ": {"code": "regularWeekend", "name": "Р’С‹С…РѕРґРЅРѕРіРѕ РґРЅСЏ", "parentCode": "regular"},
-    "РµР¶РµРЅРµРґРµР»СЊРЅР°СЏ": {"code": "regularWeekly", "name": "Р•Р¶РµРЅРµРґРµР»СЊРЅР°СЏ", "parentCode": "regular"},
+    "постоянно действующая": {"code": "regularPermanent", "name": "Постоянно действующая", "parentCode": "regular"},
+    "сезонная": {"code": "regularSeasonal", "name": "Сезонная", "parentCode": "regular"},
+    "выходного дня": {"code": "regularWeekend", "name": "Выходного дня", "parentCode": "regular"},
+    "еженедельная": {"code": "regularWeekly", "name": "Еженедельная", "parentCode": "regular"},
 }
 
 MAP_MARKET_VARIATION_SINGLE = {
-    "РїСЂР°Р·РґРЅРёС‡РЅР°СЏ": {"code": "singleFestive", "name": "РџСЂР°Р·РґРЅРёС‡РЅР°СЏ", "parentCode": "single"},
-    "СЃРµР·РѕРЅРЅР°СЏ": {"code": "singleSeasonal", "name": "РЎРµР·РѕРЅРЅР°СЏ", "parentCode": "single"},
-    "С‚РµРјР°С‚РёС‡РµСЃРєР°СЏ": {"code": "singleThematic", "name": "РўРµРјР°С‚РёС‡РµСЃРєР°СЏ", "parentCode": "single"},
+    "праздничная": {"code": "singleFestive", "name": "Праздничная", "parentCode": "single"},
+    "сезонная": {"code": "singleSeasonal", "name": "Сезонная", "parentCode": "single"},
+    "тематическая": {"code": "singleThematic", "name": "Тематическая", "parentCode": "single"},
 }
 
 
@@ -434,44 +451,44 @@ def map_market_variation_child(value, market_frequency_parent):
 
 
 MAP_DAY_OF_WEEK = {
-    "Р±РµР· РІС‹С…РѕРґРЅС‹С…": {"code": "AllWeek", "name": "Р‘РµР· РІС‹С…РѕРґРЅС‹С…"},
-    "РїРѕРЅРµРґРµР»СЊРЅРёРє": {"code": "Monday", "name": "РџРѕРЅРµРґРµР»СЊРЅРёРє"},
-    "РІС‚РѕСЂРЅРёРє": {"code": "Tuesday", "name": "Р’С‚РѕСЂРЅРёРє"},
-    "СЃСЂРµРґР°": {"code": "Wednesday", "name": "РЎСЂРµРґР°"},
-    "С‡РµС‚РІРµСЂРі": {"code": "Thursday", "name": "Р§РµС‚РІРµСЂРі"},
-    "РїСЏС‚РЅРёС†Р°": {"code": "Friday", "name": "РџСЏС‚РЅРёС†Р°"},
-    "СЃСѓР±Р±РѕС‚Р°": {"code": "Saturday", "name": "РЎСѓР±Р±РѕС‚Р°"},
-    "РІРѕСЃРєСЂРµСЃРµРЅСЊРµ": {"code": "Sunday", "name": "Р’РѕСЃРєСЂРµСЃРµРЅСЊРµ"},
+    "без выходных": {"code": "AllWeek", "name": "Без выходных"},
+    "понедельник": {"code": "Monday", "name": "Понедельник"},
+    "вторник": {"code": "Tuesday", "name": "Вторник"},
+    "среда": {"code": "Wednesday", "name": "Среда"},
+    "четверг": {"code": "Thursday", "name": "Четверг"},
+    "пятница": {"code": "Friday", "name": "Пятница"},
+    "суббота": {"code": "Saturday", "name": "Суббота"},
+    "воскресенье": {"code": "Sunday", "name": "Воскресенье"},
 }
 
 MAP_MARKET_PURPOSE = {
-    "РїСЂРѕРґРІРёР¶РµРЅРёРµ С†РµРЅРЅРѕСЃС‚РµР№ РЅР°С†РёРѕРЅР°Р»СЊРЅРѕР№ РєСѓР»СЊС‚СѓСЂС‹ СЃСЂРµРґРё РѕС‚РµС‡РµСЃС‚РІРµРЅРЅС‹С… Рё РёРЅРѕСЃС‚СЂР°РЅРЅС‹С… РїРѕСЃРµС‚РёС‚РµР»РµР№": {
+    "продвижение ценностей национальной культуры среди отечественных и иностранных посетителей": {
         "code": "culturePromotion",
-        "name": "РџСЂРѕРґРІРёР¶РµРЅРёРµ С†РµРЅРЅРѕСЃС‚РµР№ РЅР°С†РёРѕРЅР°Р»СЊРЅРѕР№ РєСѓР»СЊС‚СѓСЂС‹ СЃСЂРµРґРё РѕС‚РµС‡РµСЃС‚РІРµРЅРЅС‹С… Рё РёРЅРѕСЃС‚СЂР°РЅРЅС‹С… РїРѕСЃРµС‚РёС‚РµР»РµР№",
+        "name": "Продвижение ценностей национальной культуры среди отечественных и иностранных посетителей",
     },
-    "РёРЅР°СЏ": {"code": "other", "name": "РРЅР°СЏ"},
-    "СЂР°СЃС€РёСЂРµРЅРёРµ РєР°РЅР°Р»РѕРІ СЃР±С‹С‚Р° РїСЂРѕРґСѓРєС†РёРё РѕС‚РµС‡РµСЃС‚РІРµРЅРЅС‹С…, СЂРµРіРёРѕРЅР°Р»СЊРЅС‹С…, Р»РѕРєР°Р»СЊРЅС‹С… С‚РѕРІР°СЂРѕРїСЂРѕРёР·РІРѕРґРёС‚РµР»РµР№, РІ С‚РѕРј С‡РёСЃР»Рµ Рё РЅР° РјРµР¶РґСѓРЅР°СЂРѕРґРЅРѕРј СѓСЂРѕРІРЅРµ": {
+    "иная": {"code": "other", "name": "ная"},
+    "расширение каналов сбыта продукции отечественных, региональных, локальных товаропроизводителей, в том числе и на международном уровне": {
         "code": "marketExpansion",
-        "name": "Р Р°СЃС€РёСЂРµРЅРёРµ РєР°РЅР°Р»РѕРІ СЃР±С‹С‚Р° РїСЂРѕРґСѓРєС†РёРё РѕС‚РµС‡РµСЃС‚РІРµРЅРЅС‹С…, СЂРµРіРёРѕРЅР°Р»СЊРЅС‹С…, Р»РѕРєР°Р»СЊРЅС‹С… С‚РѕРІР°СЂРѕРїСЂРѕРёР·РІРѕРґРёС‚РµР»РµР№, РІ С‚РѕРј С‡РёСЃР»Рµ Рё РЅР° РјРµР¶РґСѓРЅР°СЂРѕРґРЅРѕРј СѓСЂРѕРІРЅРµ",
+        "name": "Расширение каналов сбыта продукции отечественных, региональных, локальных товаропроизводителей, в том числе и на международном уровне",
     },
-    "СЃРѕР·РґР°РЅРёРµ РєРѕРјС„РѕСЂС‚РЅРѕР№ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРѕР№ СЃСЂРµРґС‹": {"code": "consumerEnvironment", "name": "РЎРѕР·РґР°РЅРёРµ РєРѕРјС„РѕСЂС‚РЅРѕР№ РїРѕС‚СЂРµР±РёС‚РµР»СЊСЃРєРѕР№ СЃСЂРµРґС‹"},
-    "РїРѕРґРґРµСЂР¶РєР° РѕС‚РµС‡РµСЃС‚РІРµРЅРЅС‹С… С‚РѕРІР°СЂРѕРїСЂРѕРёР·РІРѕРґРёС‚РµР»РµР№ РІ СЂРµР°Р»РёР·Р°С†РёРё СЃРѕР±СЃС‚РІРµРЅРЅРѕР№ РїСЂРѕРґСѓРєС†РёРё": {
+    "создание комфортной потребительской среды": {"code": "consumerEnvironment", "name": "Создание комфортной потребительской среды"},
+    "поддержка отечественных товаропроизводителей в реализации собственной продукции": {
         "code": "domesticSalesSupport",
-        "name": "РџРѕРґРґРµСЂР¶РєР° РѕС‚РµС‡РµСЃС‚РІРµРЅРЅС‹С… С‚РѕРІР°СЂРѕРїСЂРѕРёР·РІРѕРґРёС‚РµР»РµР№ РІ СЂРµР°Р»РёР·Р°С†РёРё СЃРѕР±СЃС‚РІРµРЅРЅРѕР№ РїСЂРѕРґСѓРєС†РёРё",
+        "name": "Поддержка отечественных товаропроизводителей в реализации собственной продукции",
     },
-    "РѕР±РµСЃРїРµС‡РµРЅРёРµ Р·РЅР°РєРѕРјСЃС‚РІР° СЃ РЅР°С†РёРѕРЅР°Р»СЊРЅРѕР№ РёР»Рё РјРµСЃС‚РЅРѕР№ РёР»Рё СЂРµРіРёРѕРЅР°Р»СЊРЅРѕР№ РєСѓР»СЊС‚СѓСЂРѕР№, РєСѓС…РЅРµР№, С‚СЂР°РґРёС†РёСЏРјРё": {
+    "обеспечение знакомства с национальной или местной или региональной культурой, кухней, традициями": {
         "code": "culturalAwareness",
-        "name": "РћР±РµСЃРїРµС‡РµРЅРёРµ Р·РЅР°РєРѕРјСЃС‚РІР° СЃ РЅР°С†РёРѕРЅР°Р»СЊРЅРѕР№ РёР»Рё РјРµСЃС‚РЅРѕР№ РёР»Рё СЂРµРіРёРѕРЅР°Р»СЊРЅРѕР№ РєСѓР»СЊС‚СѓСЂРѕР№, РєСѓС…РЅРµР№, С‚СЂР°РґРёС†РёСЏРјРё",
+        "name": "Обеспечение знакомства с национальной или местной или региональной культурой, кухней, традициями",
     },
-    "С„РѕСЂРјРёСЂРѕРІР°РЅРёРµ СЌС„С„РµРєС‚РёРІРЅРѕР№ РєРѕРЅРєСѓСЂРµРЅС‚РЅРѕР№ СЃСЂРµРґС‹": {"code": "competitiveEnvironment", "name": "Р¤РѕСЂРјРёСЂРѕРІР°РЅРёРµ СЌС„С„РµРєС‚РёРІРЅРѕР№ РєРѕРЅРєСѓСЂРµРЅС‚РЅРѕР№ СЃСЂРµРґС‹"},
+    "формирование эффективной конкурентной среды": {"code": "competitiveEnvironment", "name": "Формирование эффективной конкурентной среды"},
 }
 
 MAP_PERMISSION_STATUS = {
-    "РґРµР№СЃС‚РІСѓРµС‚": {"code": "Working", "name": "Р”РµР№СЃС‚РІСѓРµС‚"},
-    "РїСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ": {"code": "Stop", "name": "РџСЂРёРѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ"},
-    "Р°РЅРЅСѓР»РёСЂРѕРІР°РЅРѕ": {"code": "Annul", "name": "РђРЅРЅСѓР»РёСЂРѕРІР°РЅРѕ"},
-    "РЅРµ РґРµР№СЃС‚РІСѓРµС‚": {"code": "doesNotWork", "name": "РќРµ РґРµР№СЃС‚РІСѓРµС‚"},
-    "С‡РµСЂРЅРѕРІРёРє": {"code": "Draft", "name": "Р§РµСЂРЅРѕРІРёРє"},
+    "действует": {"code": "Working", "name": "Действует"},
+    "приостановлено": {"code": "Stop", "name": "Приостановлено"},
+    "аннулировано": {"code": "Annul", "name": "Аннулировано"},
+    "не действует": {"code": "doesNotWork", "name": "Не действует"},
+    "черновик": {"code": "Draft", "name": "Черновик"},
 }
 
 
@@ -588,9 +605,9 @@ def build_day_on_block_from_row(row):
     result = []
     seen = set()
     for index in range(1, 101):
-        day = norm_str(row.get(f"{index}. Р”РµРЅСЊ РЅРµРґРµР»Рё, РєРѕС‚РѕСЂС‹Р№ РѕС‚Р»РёС‡Р°РµС‚СЃСЏ РѕС‚ РѕСЃРЅРѕРІРЅРѕРіРѕ"))
-        start = to_time_hhmm(row.get(f"{index}. Р’СЂРµРјСЏ РЅР°С‡Р°Р»Р° СЂР°Р±РѕС‚С‹ СЏСЂРјР°СЂРєРё"))
-        end = to_time_hhmm(row.get(f"{index}. Р’СЂРµРјСЏ РѕРєРѕРЅС‡Р°РЅРёСЏ СЂР°Р±РѕС‚С‹ СЏСЂРјР°СЂРєРё"))
+        day = norm_str(row.get(f"{index}. День недели, который отличается от основного"))
+        start = to_time_hhmm(row.get(f"{index}. Время начала работы ярмарки"))
+        end = to_time_hhmm(row.get(f"{index}. Время окончания работы ярмарки"))
         if not day and not start and not end:
             if index > 10:
                 break
@@ -612,7 +629,7 @@ def build_block_day_off_from_row(row):
     result = []
     seen = set()
     for index in range(1, 101):
-        day = norm_str(row.get(f"{index}. Р’С‹С…РѕРґРЅРѕР№ РґРµРЅСЊ"))
+        day = norm_str(row.get(f"{index}. Выходной день"))
         if not day:
             if index > 10:
                 break
@@ -628,10 +645,10 @@ def build_block_day_off_from_row(row):
 
 def infer_variation_from_frequency_name(value):
     key = norm_key(value)
-    if key in {"РїСЂР°Р·РґРЅРёС‡РЅР°СЏ", "С‚РµРјР°С‚РёС‡РµСЃРєР°СЏ"}:
-        return {"code": "single", "name": "Р Р°Р·РѕРІР°СЏ"}
-    if key in {"РїРѕСЃС‚РѕСЏРЅРЅРѕ РґРµР№СЃС‚РІСѓСЋС‰Р°СЏ", "РІС‹С…РѕРґРЅРѕРіРѕ РґРЅСЏ", "РµР¶РµРЅРµРґРµР»СЊРЅР°СЏ"}:
-        return {"code": "regular", "name": "Р РµРіСѓР»СЏСЂРЅР°СЏ"}
+    if key in {"праздничная", "тематическая"}:
+        return {"code": "single", "name": "Разовая"}
+    if key in {"постоянно действующая", "выходного дня", "еженедельная"}:
+        return {"code": "regular", "name": "Регулярная"}
     return None
 
 
@@ -640,19 +657,19 @@ def map_market_frequency(value, variation_obj):
     if not raw:
         return None
     key = norm_key(raw)
-    if key == "СЃРµР·РѕРЅРЅР°СЏ":
+    if key == "сезонная":
         parent_code = (variation_obj or {}).get("code")
         if parent_code == "regular":
-            return {"code": "regularSeasonal", "name": "РЎРµР·РѕРЅРЅР°СЏ", "parentCode": "regular"}
+            return {"code": "regularSeasonal", "name": "Сезонная", "parentCode": "regular"}
         if parent_code == "single":
-            return {"code": "singleSeasonal", "name": "РЎРµР·РѕРЅРЅР°СЏ", "parentCode": "single"}
+            return {"code": "singleSeasonal", "name": "Сезонная", "parentCode": "single"}
         return {"code": None, "name": raw, "parentCode": None}
     child_map = {
-        "РїРѕСЃС‚РѕСЏРЅРЅРѕ РґРµР№СЃС‚РІСѓСЋС‰Р°СЏ": {"code": "regularPermanent", "name": "РџРѕСЃС‚РѕСЏРЅРЅРѕ РґРµР№СЃС‚РІСѓСЋС‰Р°СЏ", "parentCode": "regular"},
-        "РІС‹С…РѕРґРЅРѕРіРѕ РґРЅСЏ": {"code": "regularWeekend", "name": "Р’С‹С…РѕРґРЅРѕРіРѕ РґРЅСЏ", "parentCode": "regular"},
-        "РµР¶РµРЅРµРґРµР»СЊРЅР°СЏ": {"code": "regularWeekly", "name": "Р•Р¶РµРЅРµРґРµР»СЊРЅР°СЏ", "parentCode": "regular"},
-        "РїСЂР°Р·РґРЅРёС‡РЅР°СЏ": {"code": "singleFestive", "name": "РџСЂР°Р·РґРЅРёС‡РЅР°СЏ", "parentCode": "single"},
-        "С‚РµРјР°С‚РёС‡РµСЃРєР°СЏ": {"code": "singleThematic", "name": "РўРµРјР°С‚РёС‡РµСЃРєР°СЏ", "parentCode": "single"},
+        "постоянно действующая": {"code": "regularPermanent", "name": "Постоянно действующая", "parentCode": "regular"},
+        "выходного дня": {"code": "regularWeekend", "name": "Выходного дня", "parentCode": "regular"},
+        "еженедельная": {"code": "regularWeekly", "name": "Еженедельная", "parentCode": "regular"},
+        "праздничная": {"code": "singleFestive", "name": "Праздничная", "parentCode": "single"},
+        "тематическая": {"code": "singleThematic", "name": "Тематическая", "parentCode": "single"},
     }
     hit = child_map.get(key)
     return copy.deepcopy(hit) if hit else {"code": None, "name": raw, "parentCode": None}
@@ -672,52 +689,59 @@ def resolve_unit_for_mesto(row, session, logger):
     if TEST or session is None:
         return default_org
 
-    ogrn = norm_str(row.get("РћР“Р Рќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°"))
+    ogrn = norm_str(row.get("ОГРН уполномоченного органа"))
     if not ogrn:
-        logger.warning("РћР“Р Рќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР° РѕС‚СЃСѓС‚СЃС‚РІСѓРµС‚, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ UNIT РёР· РєРѕРЅС„РёРіСѓСЂР°С†РёРё")
+        logger.warning("ОГРН уполномоченного органа отсутствует, используется UNIT из конфигурации")
         return default_org
 
     body = {"search": {"search": [{"field": "ogrn", "operator": "eq", "value": ogrn}]}, "size": 2}
     try:
-        response = api_request(session, logger, "post", f"{BASE_URL}/api/v1/search/organizations", json=body, max_retries=1)
+        response = api_request(
+            session,
+            logger,
+            "post",
+            f"{get_runtime_base_url()}/api/v1/search/organizations",
+            json=body,
+            max_retries=1,
+        )
         if response.status_code != 200:
-            logger.warning(f"РџРѕРёСЃРє РѕСЂРіР°РЅРёР·Р°С†РёРё РїРѕ РћР“Р Рќ {ogrn} РІРµСЂРЅСѓР» HTTP {response.status_code}, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ UNIT РёР· РєРѕРЅС„РёРіСѓСЂР°С†РёРё")
+            logger.warning(f"Поиск организации по ОГРН {ogrn} вернул HTTP {response.status_code}, используется UNIT из конфигурации")
             return default_org
         payload = response.json()
         items = payload.get("content") or []
         if len(items) == 1:
             return items[0]
         if len(items) > 1:
-            logger.warning(f"РџРѕ РћР“Р Рќ {ogrn} РЅР°Р№РґРµРЅРѕ РЅРµСЃРєРѕР»СЊРєРѕ РѕСЂРіР°РЅРёР·Р°С†РёР№, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ UNIT РёР· РєРѕРЅС„РёРіСѓСЂР°С†РёРё")
+            logger.warning(f"По ОГРН {ogrn} найдено несколько организаций, используется UNIT из конфигурации")
             return default_org
-        logger.warning(f"РџРѕ РћР“Р Рќ {ogrn} РѕСЂРіР°РЅРёР·Р°С†РёСЏ РЅРµ РЅР°Р№РґРµРЅР°, РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ UNIT РёР· РєРѕРЅС„РёРіСѓСЂР°С†РёРё")
+        logger.warning(f"По ОГРН {ogrn} организация не найдена, используется UNIT из конфигурации")
     except Exception as exc:
-        logger.warning(f"РћС€РёР±РєР° РїРѕРёСЃРєР° РѕСЂРіР°РЅРёР·Р°С†РёРё РїРѕ РћР“Р Рќ {ogrn}: {exc}. РСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ UNIT РёР· РєРѕРЅС„РёРіСѓСЂР°С†РёРё")
+        logger.warning(f"Ошибка поиска организации по ОГРН {ogrn}: {exc}. спользуется UNIT из конфигурации")
     return default_org
 
 
 def build_organizer_blocks(row, index):
-    choose_authority = parse_bool(row.get(f"{index}. Р’С‹Р±СЂР°С‚СЊ РѕСЂРіР°РЅ РІР»Р°СЃС‚Рё РІ РєР°С‡РµСЃС‚РІРµ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂР°"))
-    status_legal = norm_str(row.get(f"{index}. РџСЂР°РІРѕРІРѕР№ СЃС‚Р°С‚СѓСЃ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂР°"))
+    choose_authority = parse_bool(row.get(f"{index}. Выбрать орган власти в качестве организатора"))
+    status_legal = norm_str(row.get(f"{index}. Правовой статус организатора"))
 
     ul_info = {
-        "fullName": norm_str(row.get(f"{index}. РџРѕР»РЅРѕРµ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ")),
-        "ogrn": norm_str(row.get(f"{index}. РћР“Р Рќ")),
-        "inn": norm_str(row.get(f"{index}. РРќРќ")),
-        "phoneNumber": norm_str(row.get(f"{index}. РќРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°")),
-        "email": norm_str(row.get(f"{index}. Р­Р»РµРєС‚СЂРѕРЅРЅР°СЏ РїРѕС‡С‚Р°")),
+        "fullName": norm_str(row.get(f"{index}. Полное наименование")),
+        "ogrn": norm_str(row.get(f"{index}. ОГРН")),
+        "inn": norm_str(row.get(f"{index}. НН")),
+        "phoneNumber": norm_str(row.get(f"{index}. Номер телефона")),
+        "email": norm_str(row.get(f"{index}. Электронная почта")),
     }
     ip_info = {
-        "nameIP": norm_str(row.get(f"{index}. РќР°РёРјРµРЅРѕРІР°РЅРёРµ РРџ")),
-        "ogrnIP": norm_str(row.get(f"{index}. РћР“Р РќРРџ")),
-        "inn": norm_str(row.get(f"{index}. РРќРќ.1")),
-        "phoneNumber": norm_str(row.get(f"{index}. РќРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°.1")),
-        "email": norm_str(row.get(f"{index}. Р­Р»РµРєС‚СЂРѕРЅРЅР°СЏ РїРѕС‡С‚Р°.1")),
+        "nameIP": norm_str(row.get(f"{index}. Наименование П")),
+        "ogrnIP": norm_str(row.get(f"{index}. ОГРНП")),
+        "inn": norm_str(row.get(f"{index}. НН.1")),
+        "phoneNumber": norm_str(row.get(f"{index}. Номер телефона.1")),
+        "email": norm_str(row.get(f"{index}. Электронная почта.1")),
     }
     authority_info = {
-        "fullName": norm_str(row.get(f"{index}. РћСЂРіР°РЅРёР·Р°С‚РѕСЂ СЏСЂРјР°СЂРєРё")),
-        "phoneNumber": norm_str(row.get(f"{index}. РќРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°.2")),
-        "email": norm_str(row.get(f"{index}. Р­Р»РµРєС‚СЂРѕРЅРЅР°СЏ РїРѕС‡С‚Р°.2")),
+        "fullName": norm_str(row.get(f"{index}. Организатор ярмарки")),
+        "phoneNumber": norm_str(row.get(f"{index}. Номер телефона.2")),
+        "email": norm_str(row.get(f"{index}. Электронная почта.2")),
     }
 
     ul_has = has_any_non_null(ul_info)
@@ -733,19 +757,19 @@ def build_organizer_blocks(row, index):
         }
 
     status_key = norm_key(status_legal)
-    if ul_has and (not ip_has or status_key == norm_key("Р®СЂРёРґРёС‡РµСЃРєРѕРµ Р»РёС†Рѕ")):
+    if ul_has and (not ip_has or status_key == norm_key("Юридическое лицо")):
         return {
             "chooseAuthorityAsOrganizator": False,
-            "statusLegal": status_legal or "Р®СЂРёРґРёС‡РµСЃРєРѕРµ Р»РёС†Рѕ",
+            "statusLegal": status_legal or "Юридическое лицо",
             "blockOrganizerULInfo": ul_info,
             "blockOrganizerIPInfo": None,
             "blockOrganizerAuthority": None,
         }
 
-    if ip_has and (not ul_has or "РїСЂРµРґРїСЂРёРЅРёРј" in status_key):
+    if ip_has and (not ul_has or "предприним" in status_key):
         return {
             "chooseAuthorityAsOrganizator": False,
-            "statusLegal": status_legal or "РРЅРґРёРІРёРґСѓР°Р»СЊРЅС‹Р№ РїСЂРµРґРїСЂРёРЅРёРјР°С‚РµР»СЊ",
+            "statusLegal": status_legal or "ндивидуальный предприниматель",
             "blockOrganizerULInfo": None,
             "blockOrganizerIPInfo": ip_info,
             "blockOrganizerAuthority": None,
@@ -764,18 +788,18 @@ def build_market_info_items(row):
     market_info = []
     for index in get_market_indices(row):
         item_seed = {
-            "marketNumber": norm_str(row.get(f"{index}. РќРѕРјРµСЂ СЏСЂРјР°СЂРєРё")),
-            "permissionNumber": norm_str(row.get(f"{index}. РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-            "marketName": norm_str(row.get(f"{index}. РќР°РёРјРµРЅРѕРІР°РЅРёРµ СЏСЂРјР°СЂРєРё")),
-            "startDate": norm_str(row.get(f"{index}. Р”Р°С‚Р° РЅР°С‡Р°Р»Р° СЏСЂРјР°СЂРєРё")),
-            "endDate": norm_str(row.get(f"{index}. Р”Р°С‚Р° РѕРєРѕРЅС‡Р°РЅРёСЏ СЏСЂРјР°СЂРєРё")),
-            "openingTime": norm_str(row.get(f"{index}. Р’СЂРµРјСЏ РЅР°С‡Р°Р»Р° СЏСЂРјР°СЂРєРё")),
-            "closingTime": norm_str(row.get(f"{index}. Р’СЂРµРјСЏ РѕРєРѕРЅС‡Р°РЅРёСЏ СЏСЂРјР°СЂРєРё")),
-            "status": norm_str(row.get(f"{index}. РЎС‚Р°С‚СѓСЃ СЏСЂРјР°СЂРєРё")),
-            "frequency": norm_str(row.get(f"{index}. РџРµСЂРёРѕРґРёС‡РЅРѕСЃС‚СЊ РїСЂРѕРІРµРґРµРЅРёСЏ СЏСЂРјР°СЂРєРё")),
-            "variation": norm_str(row.get(f"{index}. Р’РёРґ СЏСЂРјР°СЂРєРё")),
-            "placeCount": norm_str(row.get(f"{index}. РљРѕР»РёС‡РµСЃС‚РІРѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚")),
-            "placeCountFree": norm_str(row.get(f"{index}. РљРѕР»РёС‡РµСЃС‚РІРѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚ РЅР° Р±РµР·РІРѕР·РјРµР·РґРЅРѕР№ РѕСЃРЅРѕРІРµ")),
+            "marketNumber": norm_str(row.get(f"{index}. Номер ярмарки")),
+            "permissionNumber": norm_str(row.get(f"{index}. Номер разрешения")),
+            "marketName": norm_str(row.get(f"{index}. Наименование ярмарки")),
+            "startDate": norm_str(row.get(f"{index}. Дата начала ярмарки")),
+            "endDate": norm_str(row.get(f"{index}. Дата окончания ярмарки")),
+            "openingTime": norm_str(row.get(f"{index}. Время начала ярмарки")),
+            "closingTime": norm_str(row.get(f"{index}. Время окончания ярмарки")),
+            "status": norm_str(row.get(f"{index}. Статус ярмарки")),
+            "frequency": norm_str(row.get(f"{index}. Периодичность проведения ярмарки")),
+            "variation": norm_str(row.get(f"{index}. Вид ярмарки")),
+            "placeCount": norm_str(row.get(f"{index}. Количество торговых мест")),
+            "placeCountFree": norm_str(row.get(f"{index}. Количество торговых мест на безвозмездной основе")),
         }
         org = build_organizer_blocks(row, index)
         has_meaningful_org = bool(
@@ -838,8 +862,8 @@ def build_market_info_items(row):
 def process_fair_sheet(row, logger, session=None):
     unit_resolved = resolve_unit_for_mesto(row, session if not TEST else None, logger)
     general_information = {
-        "subject": norm_str(row.get("РЎСѓР±СЉРµРєС‚ Р Р¤")),
-        "disctrict": norm_str(row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ")),
+        "subject": norm_str(row.get("Субъект РФ")),
+        "disctrict": norm_str(row.get("Муниципальный район/округ, городской округ или внутригородская территория")),
     }
     unit = {
         "id": unit_resolved.get("_id") or unit_resolved.get("id") or DEFAULT_ORG.get("id"),
@@ -847,8 +871,8 @@ def process_fair_sheet(row, logger, session=None):
         "guid": unit_resolved.get("guid") or DEFAULT_ORG.get("guid"),
         "name": norm_str(unit_resolved.get("name")) or DEFAULT_ORG.get("name"),
         "shortName": unit_resolved.get("shortName") or DEFAULT_ORG.get("shortName"),
-        "ogrn": norm_str(row.get("РћР“Р Рќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°")) or norm_str(unit_resolved.get("ogrn")) or DEFAULT_ORG.get("ogrn"),
-        "inn": norm_str(row.get("РРќРќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°")) or norm_str(unit_resolved.get("inn")),
+        "ogrn": norm_str(row.get("ОГРН уполномоченного органа")) or norm_str(unit_resolved.get("ogrn")) or DEFAULT_ORG.get("ogrn"),
+        "inn": norm_str(row.get("НН уполномоченного органа")) or norm_str(unit_resolved.get("inn")),
         "kpp": unit_resolved.get("kpp") or DEFAULT_ORG.get("kpp"),
         "email": unit_resolved.get("email") or DEFAULT_ORG.get("email"),
         "site": unit_resolved.get("site") or DEFAULT_ORG.get("site"),
@@ -856,30 +880,30 @@ def process_fair_sheet(row, logger, session=None):
         "regions": unit_resolved.get("regions") or DEFAULT_ORG.get("regions"),
     }
 
-    market_variation = map_market_frequency_parent(row.get("РџРµСЂРёРѕРґРёС‡РЅРѕСЃС‚СЊ РїСЂРѕРІРµРґРµРЅРёСЏ СЏСЂРјР°СЂРєРё"))
+    market_variation = map_market_frequency_parent(row.get("Периодичность проведения ярмарки"))
     if not market_variation:
-        market_variation = infer_variation_from_frequency_name(row.get("Р’РёРґ СЏСЂРјР°СЂРєРё"))
-    market_frequency = map_market_frequency(row.get("Р’РёРґ СЏСЂРјР°СЂРєРё"), market_variation)
+        market_variation = infer_variation_from_frequency_name(row.get("Вид ярмарки"))
+    market_frequency = map_market_frequency(row.get("Вид ярмарки"), market_variation)
 
-    no_days_off = parse_bool(row.get("Р‘РµР· РІС‹С…РѕРґРЅС‹С…"))
+    no_days_off = parse_bool(row.get("Без выходных"))
     block_organizer_ul = {
-        "fullName": norm_str(row.get("РџРѕР»РЅРѕРµ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ")),
-        "shortName": norm_str(row.get("РЎРѕРєСЂР°С‰С‘РЅРЅРѕРµ РЅР°РёРјРµРЅРѕРІР°РЅРёРµ")),
-        "orgStateForm": map_org_state_form(row.get("РћСЂРіР°РЅРёР·Р°С†РёРѕРЅРЅРѕ-РїСЂР°РІРѕРІР°СЏ С„РѕСЂРјР°")),
-        "ogrn": norm_str(row.get("РћР“Р Рќ")),
-        "inn": norm_str(row.get("РРќРќ")),
-        "kpp": norm_str(row.get("РљРџРџ")),
-        "fioUL": norm_str(row.get("Р¤РРћ СЂСѓРєРѕРІРѕРґРёС‚РµР»СЏ")),
-        "phoneNumber": norm_str(row.get("РќРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°")),
-        "email": norm_str(row.get("Р­Р»РµРєС‚СЂРѕРЅРЅР°СЏ РїРѕС‡С‚Р°")),
-        "addressUL": parse_address_to_obj(row.get("Р®СЂРёРґРёС‡РµСЃРєРёР№ Р°РґСЂРµСЃ")),
-        "addressFact": parse_address_to_obj(row.get("Р¤Р°РєС‚РёС‡РµСЃРєРёР№ Р°РґСЂРµСЃ")),
+        "fullName": norm_str(row.get("Полное наименование")),
+        "shortName": norm_str(row.get("Сокращённое наименование")),
+        "orgStateForm": map_org_state_form(row.get("Организационно-правовая форма")),
+        "ogrn": norm_str(row.get("ОГРН")),
+        "inn": norm_str(row.get("НН")),
+        "kpp": norm_str(row.get("КПП")),
+        "fioUL": norm_str(row.get("ФО руководителя")),
+        "phoneNumber": norm_str(row.get("Номер телефона")),
+        "email": norm_str(row.get("Электронная почта")),
+        "addressUL": parse_address_to_obj(row.get("Юридический адрес")),
+        "addressFact": parse_address_to_obj(row.get("Фактический адрес")),
     }
     block_organizer_ip = {
-        "nameIP": norm_str(row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ РРџ")),
+        "nameIP": norm_str(row.get("Наименование П")),
         "fioIP": None,
-        "inn": norm_str(row.get("РРќРќ.1")),
-        "ogrnIP": norm_str(row.get("РћР“Р РќРРџ")),
+        "inn": norm_str(row.get("НН.1")),
+        "ogrnIP": norm_str(row.get("ОГРНП")),
         "passportSeries": None,
         "passportNumber": None,
         "passportIssueDate": None,
@@ -892,50 +916,50 @@ def process_fair_sheet(row, logger, session=None):
         "addressPost": {"fullAddress": None, "postalCode": None},
     }
     block_organizer_authority = {
-        "fullName": norm_str(row.get("РћСЂРіР°РЅРёР·Р°С‚РѕСЂ СЏСЂРјР°СЂРєРё")),
-        "phoneNumber": norm_str(row.get("РќРѕРјРµСЂ С‚РµР»РµС„РѕРЅР°.1")),
-        "email": norm_str(row.get("Р­Р»РµРєС‚СЂРѕРЅРЅР°СЏ РїРѕС‡С‚Р°.1")),
+        "fullName": norm_str(row.get("Организатор ярмарки")),
+        "phoneNumber": norm_str(row.get("Номер телефона.1")),
+        "email": norm_str(row.get("Электронная почта.1")),
     }
 
     market_info = {
-        "marketNumber": norm_str(row.get("РќРѕРјРµСЂ СЏСЂРјР°СЂРєРё")),
-        "permissionNumber": norm_str(row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-        "marketStatus": map_market_status(row.get("РЎС‚Р°С‚СѓСЃ СЏСЂРјР°СЂРєРё")),
-        "marketName": norm_str(row.get("РќР°РёРјРµРЅРѕРІР°РЅРёРµ СЏСЂРјР°СЂРєРё")),
-        "marketType": map_market_type(row.get("РўРёРї СЏСЂРјР°СЂРєРё")),
-        "marketSpecialization": map_market_specialization(row.get("РЎРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЏСЂРјР°СЂРєРё")),
-        "marketSpecializationOther": norm_str(row.get("РРЅР°СЏ СЃРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЏСЂРјР°СЂРєРё")),
-        "marketPurpose": map_market_purpose(row.get("Р¦РµР»СЊ СЏСЂРјР°СЂРєРё")),
-        "marketPurposeOther": norm_str(row.get("РРЅР°СЏ С†РµР»СЊ СЏСЂРјР°СЂРєРё")),
+        "marketNumber": norm_str(row.get("Номер ярмарки")),
+        "permissionNumber": norm_str(row.get("Номер разрешения")),
+        "marketStatus": map_market_status(row.get("Статус ярмарки")),
+        "marketName": norm_str(row.get("Наименование ярмарки")),
+        "marketType": map_market_type(row.get("Тип ярмарки")),
+        "marketSpecialization": map_market_specialization(row.get("Специализация ярмарки")),
+        "marketSpecializationOther": norm_str(row.get("ная специализация ярмарки")),
+        "marketPurpose": map_market_purpose(row.get("Цель ярмарки")),
+        "marketPurposeOther": norm_str(row.get("ная цель ярмарки")),
         "marketVariation": market_variation,
         "marketFrequency": market_frequency,
-        "marketArea": norm_str(row.get("РџР»РѕС‰Р°РґСЊ СЏСЂРјР°СЂРєРё, РєРІ. Рј")),
+        "marketArea": norm_str(row.get("Площадь ярмарки, кв. м")),
         "blockMarketDates": {
-            "startDate": parse_date_to_iso(row.get("РЎСЂРѕРєРё РїСЂРѕРІРµРґРµРЅРёСЏ СЏСЂРјР°СЂРєРё: РґР°С‚Р° РЅР°С‡Р°Р»Р°")),
-            "endDate": parse_date_to_iso(row.get("РЎСЂРѕРєРё РїСЂРѕРІРµРґРµРЅРёСЏ СЏСЂРјР°СЂРєРё: РґР°С‚Р° РѕРєРѕРЅС‡Р°РЅРёСЏ")),
+            "startDate": parse_date_to_iso(row.get("Сроки проведения ярмарки: дата начала")),
+            "endDate": parse_date_to_iso(row.get("Сроки проведения ярмарки: дата окончания")),
         },
         "blockMarketOperatingTime": {
-            "marketOpeningTime": to_time_hhmm(row.get("Р РµР¶РёРј СЂР°Р±РѕС‚С‹ СЏСЂРјР°СЂРєРё: РІСЂРµРјСЏ РЅР°С‡Р°Р»Р°")),
-            "marketClosingTime": to_time_hhmm(row.get("Р РµР¶РёРј СЂР°Р±РѕС‚С‹ СЏСЂРјР°СЂРєРё: РІСЂРµРјСЏ РѕРєРѕРЅС‡Р°РЅРёСЏ")),
+            "marketOpeningTime": to_time_hhmm(row.get("Режим работы ярмарки: время начала")),
+            "marketClosingTime": to_time_hhmm(row.get("Режим работы ярмарки: время окончания")),
         },
         "dayOnBlock": build_day_on_block_from_row(row),
-        "dayOffDayOff": copy.deepcopy(MAP_DAY_OF_WEEK["Р±РµР· РІС‹С…РѕРґРЅС‹С…"]) if no_days_off is True else None,
+        "dayOffDayOff": copy.deepcopy(MAP_DAY_OF_WEEK["без выходных"]) if no_days_off is True else None,
         "BlockDayOff": [] if no_days_off is True else build_block_day_off_from_row(row),
-        "sanitaryDayOfMonth": norm_str(row.get("РЎР°РЅРёС‚Р°СЂРЅС‹Р№ РґРµРЅСЊ РјРµСЃСЏС†Р°")),
-        "placeCount": norm_str(row.get("РљРѕР»РёС‡РµСЃС‚РІРѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚")),
-        "placeCountFree": norm_str(row.get("РљРѕР»РёС‡РµСЃС‚РІРѕ С‚РѕСЂРіРѕРІС‹С… РјРµСЃС‚ РЅР° Р±РµР·РІРѕР·РјРµР·РґРЅРѕР№ РѕСЃРЅРѕРІРµ")),
-        "placeNumber": norm_str(row.get("РќРѕРјРµСЂ РјРµСЃС‚Р° РґР»СЏ СЂР°Р·РјРµС‰РµРЅРёСЏ СЏСЂРјР°СЂРѕРє")),
+        "sanitaryDayOfMonth": norm_str(row.get("Санитарный день месяца")),
+        "placeCount": norm_str(row.get("Количество торговых мест")),
+        "placeCountFree": norm_str(row.get("Количество торговых мест на безвозмездной основе")),
+        "placeNumber": norm_str(row.get("Номер места для размещения ярмарок")),
         "blockCadNumber": [],
         "cadsObjects": [],
     }
 
-    cad_land = norm_str(row.get("РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ Р·РµРјРµР»СЊРЅРѕРіРѕ СѓС‡Р°СЃС‚РєР°"))
-    addr_land = row.get("РђРґСЂРµСЃ Р·РµРјРµР»СЊРЅРѕРіРѕ СѓС‡Р°СЃС‚РєР°")
+    cad_land = norm_str(row.get("Кадастровый номер земельного участка"))
+    addr_land = row.get("Адрес земельного участка")
     if cad_land or norm_str(addr_land):
         market_info["blockCadNumber"].append({"cadObjNum": cad_land, "landAddress": parse_address_to_obj(addr_land)})
 
-    cad_obj = norm_str(row.get("РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё"))
-    addr_obj = row.get("РђРґСЂРµСЃ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё")
+    cad_obj = norm_str(row.get("Кадастровый номер объекта недвижимости"))
+    addr_obj = row.get("Адрес объекта недвижимости")
     if cad_obj or norm_str(addr_obj):
         market_info["cadsObjects"].append({"cadNumber": cad_obj, "objectAddress": parse_address_to_obj(addr_obj)})
 
@@ -945,8 +969,8 @@ def process_fair_sheet(row, logger, session=None):
         "generalInformation": general_information,
         "unit": unit,
         "marketInfo": market_info,
-        "chooseAuthorityAsOrganizator": parse_bool(row.get("Р’С‹Р±СЂР°С‚СЊ РѕСЂРіР°РЅ РІР»Р°СЃС‚Рё РІ РєР°С‡РµСЃС‚РІРµ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂР°")),
-        "statusLegal": norm_str(row.get("РџСЂР°РІРѕРІРѕР№ СЃС‚Р°С‚СѓСЃ РѕСЂРіР°РЅРёР·Р°С‚РѕСЂР°")),
+        "chooseAuthorityAsOrganizator": parse_bool(row.get("Выбрать орган власти в качестве организатора")),
+        "statusLegal": norm_str(row.get("Правовой статус организатора")),
         "blockOrganizerULInfo": block_organizer_ul,
         "blockOrganizerIPInfo": block_organizer_ip,
     }
@@ -957,8 +981,8 @@ def process_fair_sheet(row, logger, session=None):
 
 def process_mesto_sheet(row, logger, session=None):
     unit_resolved = resolve_unit_for_mesto(row, session, logger)
-    subject = norm_str(row.get("РЎСѓР±СЉРµРєС‚ Р Р¤"))
-    district = norm_str(row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ"))
+    subject = norm_str(row.get("Субъект РФ"))
+    district = norm_str(row.get("Муниципальный район/округ, городской округ или внутригородская территория"))
 
     general_information = {
         "subject": subject,
@@ -971,8 +995,8 @@ def process_mesto_sheet(row, logger, session=None):
         "guid": unit_resolved.get("guid") or DEFAULT_ORG.get("guid"),
         "name": unit_resolved.get("name") or DEFAULT_ORG.get("name"),
         "shortName": unit_resolved.get("shortName") or DEFAULT_ORG.get("shortName"),
-        "ogrn": norm_str(row.get("РћР“Р Рќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°")) or norm_str(unit_resolved.get("ogrn")),
-        "inn": norm_str(row.get("РРќРќ СѓРїРѕР»РЅРѕРјРѕС‡РµРЅРЅРѕРіРѕ РѕСЂРіР°РЅР°")) or norm_str(unit_resolved.get("inn")),
+        "ogrn": norm_str(row.get("ОГРН уполномоченного органа")) or norm_str(unit_resolved.get("ogrn")),
+        "inn": norm_str(row.get("НН уполномоченного органа")) or norm_str(unit_resolved.get("inn")),
         "kpp": unit_resolved.get("kpp") or DEFAULT_ORG.get("kpp"),
         "email": unit_resolved.get("email") or DEFAULT_ORG.get("email"),
         "site": unit_resolved.get("site") or DEFAULT_ORG.get("site"),
@@ -980,33 +1004,33 @@ def process_mesto_sheet(row, logger, session=None):
         "regions": unit_resolved.get("regions") or DEFAULT_ORG.get("regions"),
     }
 
-    status_fair_place = map_status_fair_place(row.get("РЎС‚Р°С‚СѓСЃ РїСЂРѕРµРєС‚РЅРѕРіРѕ РјРµСЃС‚Р°"))
+    status_fair_place = map_status_fair_place(row.get("Статус проектного места"))
     place_market_info = {
-        "marketSchemeNumber": norm_str(row.get("РќРѕРјРµСЂ РјРµСЃС‚Р° РґР»СЏ СЂР°Р·РјРµС‰РµРЅРёСЏ СЏСЂРјР°СЂРѕРє")),
-        "coordinates": norm_str(row.get("Р“РµРѕРєРѕРѕСЂРґРёРЅР°С‚С‹ С‚РѕС‡РєРё СЂР°Р·РјРµС‰РµРЅРёСЏ РѕСЂРіР°РЅРёР·СѓРµРјРѕР№ СЏСЂРјР°СЂРєРё")),
+        "marketSchemeNumber": norm_str(row.get("Номер места для размещения ярмарок")),
+        "coordinates": norm_str(row.get("Геокоординаты точки размещения организуемой ярмарки")),
         "landArea": pick_first_non_empty(
-            norm_str(row.get("РџР»РѕС‰Р°РґСЊ РјРµСЃС‚Р° РґР»СЏ СЂР°Р·РјРµС‰РµРЅРёСЏ СЏСЂРјР°СЂРєРё, РєРІ. Рј")),
-            norm_str(row.get("РџР»РѕС‰Р°РґСЊ РјРµСЃС‚Р° РґР»СЏ СЂР°Р·РјРµС‰РµРЅРёСЏ СЏСЂРјР°СЂРєРё, РєРІ.Рј")),
+            norm_str(row.get("Площадь места для размещения ярмарки, кв. м")),
+            norm_str(row.get("Площадь места для размещения ярмарки, кв.м")),
         ),
-        "marketType": map_market_type(row.get("РўРёРї СЏСЂРјР°СЂРєРё")),
-        "marketSpecialization": map_market_specialization(row.get("РЎРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЏСЂРјР°СЂРєРё")),
-        "marketSpecializationOther": norm_str(row.get("РРЅР°СЏ СЃРїРµС†РёР°Р»РёР·Р°С†РёСЏ СЏСЂРјР°СЂРєРё")),
+        "marketType": map_market_type(row.get("Тип ярмарки")),
+        "marketSpecialization": map_market_specialization(row.get("Специализация ярмарки")),
+        "marketSpecializationOther": norm_str(row.get("ная специализация ярмарки")),
         "statusFairPlace": status_fair_place,
-        "statusFairPlaceSpecific": map_status_fair_place_specific(row.get("РЎРїРµС†РёС„РёРєР°С†РёСЏ СЃС‚Р°С‚СѓСЃР° РїСЂРѕРµРєС‚РЅРѕРіРѕ РјРµСЃС‚Р°"), status_fair_place),
-        "statusPlaceFair": norm_str(row.get("РЎС‚Р°С‚СѓСЃ РІ Р РµРµСЃС‚СЂРµ РјРµСЃС‚ РЅР° СЂР°Р·РјРµС‰РµРЅРёСЏ СЏСЂРјР°СЂРѕРє")),
+        "statusFairPlaceSpecific": map_status_fair_place_specific(row.get("Спецификация статуса проектного места"), status_fair_place),
+        "statusPlaceFair": norm_str(row.get("Статус в Реестре мест на размещения ярмарок")),
         "blockCadNumber": [],
         "cadsObjects": [],
     }
 
-    cad_land = norm_str(row.get("РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ Р·РµРјРµР»СЊРЅРѕРіРѕ СѓС‡Р°СЃС‚РєР°"))
-    addr_land = norm_str(row.get("РђРґСЂРµСЃ Р·РµРјРµР»СЊРЅРѕРіРѕ СѓС‡Р°СЃС‚РєР°"))
+    cad_land = norm_str(row.get("Кадастровый номер земельного участка"))
+    addr_land = norm_str(row.get("Адрес земельного участка"))
     if not is_empty_val(cad_land) or not is_empty_val(addr_land):
         place_market_info["blockCadNumber"].append(
             {"cadNumber": cad_land, "landAddress": parse_address_to_obj(addr_land)}
         )
 
-    cad_obj = norm_str(row.get("РљР°РґР°СЃС‚СЂРѕРІС‹Р№ РЅРѕРјРµСЂ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё"))
-    addr_obj = norm_str(row.get("РђРґСЂРµСЃ РѕР±СЉРµРєС‚Р° РЅРµРґРІРёР¶РёРјРѕСЃС‚Рё"))
+    cad_obj = norm_str(row.get("Кадастровый номер объекта недвижимости"))
+    addr_obj = norm_str(row.get("Адрес объекта недвижимости"))
     if not is_empty_val(cad_obj) or not is_empty_val(addr_obj):
         place_market_info["cadsObjects"].append(
             {"cadObjNum": cad_obj, "objectAddress": parse_address_to_obj(addr_obj)}
@@ -1049,14 +1073,14 @@ def build_nsi_local_object_fair_from_payload(payload, market_item=None):
 
     type_code = (place_market_info.get("marketType") or {}).get("code")
     type_name = (place_market_info.get("marketType") or {}).get("name")
-    is_universal = type_code == "universal" or norm_key(type_name) == norm_key("РЈРЅРёРІРµСЂСЃР°Р»СЊРЅР°СЏ")
+    is_universal = type_code == "universal" or norm_key(type_name) == norm_key("Универсальная")
 
     specialization_out = "-"
     if not is_universal:
         spec_obj = place_market_info.get("marketSpecialization") or {}
         spec_name = norm_str(spec_obj.get("name") or spec_obj.get("code"))
         if spec_name:
-            is_other = spec_obj.get("code") == "other" or norm_key(spec_name) in {norm_key("РРЅР°СЏ"), "other"}
+            is_other = spec_obj.get("code") == "other" or norm_key(spec_name) in {norm_key("ная"), "other"}
             specialization_out = dash_str(place_market_info.get("marketSpecializationOther")) if is_other else dash_str(spec_name)
 
     organizer_name = "-"
@@ -1090,7 +1114,7 @@ def build_nsi_local_object_fair_from_payload(payload, market_item=None):
 
     out = {
         "LayerId": "3",
-        "Layer": "РЇСЂРјР°СЂРєРё",
+        "Layer": "Ярмарки",
         "dictionaryType": "local",
         "dictionaryUnitId": dash_str(unit.get("_id") or unit.get("id")),
         "autokey": nsi_guid,
@@ -1146,23 +1170,29 @@ def process_permits_sheet(row, logger):
             "ogrn": DEFAULT_ORG.get("ogrn"),
         },
         "generalInformation": {
-            "subject": norm_str(row.get("РЎСѓР±СЉРµРєС‚ Р Р¤")),
-            "disctrict": norm_str(row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ")),
+            "subject": norm_str(row.get("Субъект РФ")),
+            "disctrict": norm_str(row.get("Муниципальный район/округ, городской округ или внутригородская территория")),
         },
         "permission": {
-            "permissionNumber": norm_str(row.get("РќРѕРјРµСЂ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-            "permissionStatus": map_permission_status(row.get("РЎС‚Р°С‚СѓСЃ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-            "fairNumber": norm_str(row.get("РќРѕРјРµСЂ СЏСЂРјР°СЂРєРё")),
-            "permissionDate": parse_date_to_iso(row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-            "permissionStartDate": parse_date_to_iso(row.get("Р”Р°С‚Р° РЅР°С‡Р°Р»Р° РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
-            "permissionEndDate": parse_date_to_iso(row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ")),
+            "permissionNumber": norm_str(row.get("Номер разрешения")),
+            "permissionStatus": map_permission_status(row.get("Статус разрешения")),
+            "fairNumber": norm_str(row.get("Номер ярмарки")),
+            "permissionDate": parse_date_to_iso(row.get("Дата выдачи разрешения")),
+            "permissionStartDate": parse_date_to_iso(row.get("Дата начала действия разрешения")),
+            "permissionEndDate": parse_date_to_iso(row.get("Дата завершения действия разрешения")),
             "permissionFile": None,
         },
     }
 
 
 def create_record(session, logger, collection, payload):
-    response = api_request(session, logger, "post", f"{BASE_URL}/api/v1/create/{collection}", json=jsonable(payload))
+    response = api_request(
+        session,
+        logger,
+        "post",
+        f"{get_runtime_base_url()}/api/v1/create/{collection}",
+        json=jsonable(payload),
+    )
     if not response.ok:
         return None, response
     return response.json(), response
@@ -1183,7 +1213,14 @@ def find_fair_by_number(session, logger, fair_number, subject=None, district=Non
         tried.append(field)
         body = {"search": {"search": [{"field": field, "operator": "eq", "value": fair_number}]}, "size": 2}
         try:
-            response = api_request(session, logger, "post", f"{BASE_URL}/api/v1/search/{NSI_LOCAL_OBJECT_FAIR_COLLECTION}", json=body, max_retries=1)
+            response = api_request(
+                session,
+                logger,
+                "post",
+                f"{get_runtime_base_url()}/api/v1/search/{NSI_LOCAL_OBJECT_FAIR_COLLECTION}",
+                json=body,
+                max_retries=1,
+            )
             if response.status_code != 200:
                 continue
             content = (response.json() or {}).get("content") or []
@@ -1210,21 +1247,21 @@ def find_fair_by_number(session, logger, fair_number, subject=None, district=Non
 def update_fair_dates_from_permit(row, session, logger, success_logger, fail_logger, row_num):
     if TEST or session is None:
         return
-    fair_number = norm_str(row.get("РќРѕРјРµСЂ СЏСЂРјР°СЂРєРё"))
-    subject = norm_str(row.get("РЎСѓР±СЉРµРєС‚ Р Р¤"))
-    district = norm_str(row.get("РњСѓРЅРёС†РёРїР°Р»СЊРЅС‹Р№ СЂР°Р№РѕРЅ/РѕРєСЂСѓРі, РіРѕСЂРѕРґСЃРєРѕР№ РѕРєСЂСѓРі РёР»Рё РІРЅСѓС‚СЂРёРіРѕСЂРѕРґСЃРєР°СЏ С‚РµСЂСЂРёС‚РѕСЂРёСЏ"))
+    fair_number = norm_str(row.get("Номер ярмарки"))
+    subject = norm_str(row.get("Субъект РФ"))
+    district = norm_str(row.get("Муниципальный район/округ, городской округ или внутригородская территория"))
 
     result = find_fair_by_number(session, logger, fair_number, subject=subject, district=district)
     if not result.get("ok"):
         if result.get("many"):
             logger.warning(
-                f"Р”Р»СЏ СЏСЂРјР°СЂРєРё {fair_number} РЅР°Р№РґРµРЅРѕ РЅРµСЃРєРѕР»СЊРєРѕ Р·Р°РїРёСЃРµР№ nsiLocalObjectFair "
-                f"СЃ Subject={subject!r} Рё Disctrict={district!r}"
+                f"Для ярмарки {fair_number} найдено несколько записей nsiLocalObjectFair "
+                f"с Subject={subject!r} и Disctrict={district!r}"
             )
         else:
             logger.warning(
-                f"РЇСЂРјР°СЂРєР° {fair_number} РЅРµ РЅР°Р№РґРµРЅР° РІ nsiLocalObjectFair "
-                f"СЃ Subject={subject!r} Рё Disctrict={district!r}"
+                f"Ярмарка {fair_number} не найдена в nsiLocalObjectFair "
+                f"с Subject={subject!r} и Disctrict={district!r}"
             )
         return
 
@@ -1232,35 +1269,35 @@ def update_fair_dates_from_permit(row, session, logger, success_logger, fail_log
     update_doc = {"_id": found_fair["_id"], "guid": found_fair["guid"]}
     if found_fair.get("auid"):
         update_doc["auid"] = found_fair["auid"]
-    update_doc["PermissionStartDate"] = as_date_or_dash_dmy(row.get("Р”Р°С‚Р° РІС‹РґР°С‡Рё СЂР°Р·СЂРµС€РµРЅРёСЏ"))
-    update_doc["PermissionEndDate"] = as_date_or_dash_dmy(row.get("Р”Р°С‚Р° Р·Р°РІРµСЂС€РµРЅРёСЏ РґРµР№СЃС‚РІРёСЏ СЂР°Р·СЂРµС€РµРЅРёСЏ"))
+    update_doc["PermissionStartDate"] = as_date_or_dash_dmy(row.get("Дата выдачи разрешения"))
+    update_doc["PermissionEndDate"] = as_date_or_dash_dmy(row.get("Дата завершения действия разрешения"))
 
     response = api_request(
         session,
         logger,
         "put",
-        f"{BASE_URL}/api/v1/update/{NSI_LOCAL_OBJECT_FAIR_COLLECTION}?mainId={found_fair['_id']}&guid={found_fair['guid']}",
+        f"{get_runtime_base_url()}/api/v1/update/{NSI_LOCAL_OBJECT_FAIR_COLLECTION}?mainId={found_fair['_id']}&guid={found_fair['guid']}",
         json=jsonable(update_doc),
     )
     if response.ok:
         log_success(success_logger, {"_id": found_fair["_id"], "guid": found_fair["guid"], "parentEntries": NSI_LOCAL_OBJECT_FAIR_COLLECTION})
         return
-    logger.error(f"РћС€РёР±РєР° РѕР±РЅРѕРІР»РµРЅРёСЏ {NSI_LOCAL_OBJECT_FAIR_COLLECTION} РґР»СЏ РЅРѕРјРµСЂР° СЏСЂРјР°СЂРєРё {fair_number}: HTTP {response.status_code}")
+    logger.error(f"Ошибка обновления {NSI_LOCAL_OBJECT_FAIR_COLLECTION} для номера ярмарки {fair_number}: HTTP {response.status_code}")
     fail_logger.info(f"{SHEET_PERMITS}:{row_num}:fair_update")
 
 
 def handle_permit_file_upload(row, rec_data, collection, record_json, session, logger, fail_logger, row_num, files_dir):
-    file_hint = norm_str(row.get("Р Р°Р·СЂРµС€РµРЅРёРµ РЅР° РїСЂР°РІРѕ РѕСЂРіР°РЅРёР·Р°С†РёРё СЏСЂРјР°СЂРєРё"))
+    file_hint = norm_str(row.get("Разрешение на право организации ярмарки"))
     file_path = find_file_in_dir(files_dir, file_hint) if file_hint else None
     file_field = "permission.permissionFile"
 
     if not file_path:
         return True
 
-    logger.info(f"РќР°Р№РґРµРЅ С„Р°Р№Р» РґР»СЏ СЂР°Р·СЂРµС€РµРЅРёСЏ: {os.path.basename(file_path)}")
+    logger.info(f"Найден файл для разрешения: {os.path.basename(file_path)}")
     file_object = upload_file(session, logger, file_path, collection, record_json["_id"], entity_field_path=file_field)
     if not file_object:
-        logger.error("РћС€РёР±РєР° РїСЂРё Р·Р°РіСЂСѓР·РєРµ С„Р°Р№Р»Р° СЂР°Р·СЂРµС€РµРЅРёСЏ")
+        logger.error("Ошибка при загрузке файла разрешения")
         delete_from_collection(session, logger, record_json)
         fail_logger.info(f"{SHEET_PERMITS}:{row_num}")
         return False
@@ -1270,55 +1307,85 @@ def handle_permit_file_upload(row, rec_data, collection, record_json, session, l
         "guid": rec_data["guid"],
         "permission": {**rec_data["permission"], "permissionFile": file_object},
     }
-    update_url = f"{BASE_URL}/api/v1/update/{collection}?mainId={record_json['_id']}&guid={rec_data['guid']}"
+    update_url = f"{get_runtime_base_url()}/api/v1/update/{collection}?mainId={record_json['_id']}&guid={rec_data['guid']}"
     update_response = api_request(session, logger, "put", update_url, json=jsonable(update_payload))
     if update_response.ok:
         return True
 
-    logger.error("РћС€РёР±РєР° РїСЂРё РѕР±РЅРѕРІР»РµРЅРёРё Р·Р°РїРёСЃРё СЃ С„Р°Р№Р»РѕРј")
+    logger.error("Ошибка при обновлении записи с файлом")
     delete_file_from_storage(session, logger, file_object["_id"])
     delete_from_collection(session, logger, record_json)
     fail_logger.info(f"{SHEET_PERMITS}:{row_num}")
     return False
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Fairs migration runner")
-    parser.add_argument("--workbook", default=os.path.join(SCRIPT_DIR, EXCEL_FILE_NAME), help="Path to XLSM workbook")
-    parser.add_argument("--files-dir", default=FILES_DIR, help="Directory with attachment files")
-    parser.add_argument(
-        "--sheet",
-        choices=["all", "fair", "mesto", "permits"],
-        default="all",
-        help="Sheets to process",
-    )
-    parser.add_argument("--limit", type=int, default=0, help="Max rows per sheet (0 = no limit)")
-    parser.add_argument("--no-auth", action="store_true", help="Skip API authentication")
-    parser.add_argument("--no-prompt", action="store_true", help="Do not ask for cookie/token in console")
-    parser.add_argument("--no-interactive", action="store_true", help="Disable interactive prompts")
-    parser.add_argument("--state-file", default=str(STATE_FILE), help="Path to checkpoints JSON")
-    parser.add_argument("--reset-state", action="store_true", help="Clear checkpoints before run")
-    parser.add_argument("--resume", dest="resume", action="store_true", default=RESUME_BY_DEFAULT, help="Resume from checkpoints")
-    parser.add_argument("--no-resume", dest="resume", action="store_false", help="Ignore checkpoints")
-    return parser.parse_args()
+@dataclass
+class WorkbookRunSpec:
+    workbook_path: str
+    files_dir: str
 
 
-def _prompt_with_default(label, default_value, interactive):
+def _console_block(title: str, lines: Optional[List[str]] = None, width: int = 92) -> str:
+    safe_title = str(title or "").strip() or "Блок"
+    content = ["", "=" * width, safe_title, "-" * width]
+    for line in (lines or []):
+        content.append(str(line))
+    content.append("=" * width)
+    return "\n".join(content)
+
+
+def _format_iso_for_console(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    try:
+        normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return text
+
+
+def _prompt_with_default(label: str, default_value: str, interactive: bool) -> str:
     if not interactive:
         return default_value
     entered = input(f"{label} [{default_value}]: ").strip().strip('"').strip("'")
     return entered or default_value
 
 
-def _ask_yes_no(prompt, default_yes=True):
+def _ask_yes_no(prompt: str, default_yes: bool = True) -> bool:
     suffix = " [Y/n]: " if default_yes else " [y/N]: "
     answer = input(prompt + suffix).strip().lower()
     if not answer:
         return default_yes
-    return answer in {"y", "yes"}
+    return answer in {"y", "yes", "д", "да"}
 
 
-def _selected_lists(sheet_mode):
+def _ask_error_action() -> str:
+    print("Ошибка строки. Действие: [r]etry / [s]kip / [a]bort")
+    while True:
+        answer = input("Выбор: ").strip().lower()
+        if answer in {"r", "retry"}:
+            return "retry"
+        if answer in {"s", "skip"}:
+            return "skip"
+        if answer in {"a", "abort", "stop"}:
+            return "abort"
+        if not answer:
+            return "abort"
+        print("Введите r, s или a")
+
+
+def _operator_action_on_row_error(*, operator_mode: bool, interactive: bool, logger, context: str) -> str:
+    if not (operator_mode and interactive):
+        return "skip"
+    logger.warning("Ошибка обработки строки: %s", context)
+    return _ask_error_action()
+
+
+def _selected_lists(sheet_mode: str) -> List[str]:
     mapping = {
         "fair": SHEET_FAIR,
         "mesto": SHEET_MESTO,
@@ -1328,6 +1395,318 @@ def _selected_lists(sheet_mode):
         return list(EXCEL_LISTS)
     selected = mapping.get(sheet_mode)
     return [selected] if selected else list(EXCEL_LISTS)
+
+
+def _numeric_hints(text: str) -> List[str]:
+    normalized = (" " + str(text or "").strip().lower() + " ")
+    hints = set()
+    for token in normalized.split():
+        if token.isdigit():
+            hints.add(token)
+    word_map = {
+        " one ": "1",
+        " first ": "1",
+        " two ": "2",
+        " second ": "2",
+        " three ": "3",
+        " third ": "3",
+        " один ": "1",
+        " первый ": "1",
+        " первая ": "1",
+        " два ": "2",
+        " второй ": "2",
+        " вторая ": "2",
+        " три ": "3",
+        " третий ": "3",
+        " третья ": "3",
+    }
+    for needle, number in word_map.items():
+        if needle in normalized:
+            hints.add(number)
+    return sorted(hints)
+
+
+def _choose_single_workbook(candidates: List[str], interactive: bool) -> Optional[str]:
+    if not candidates:
+        return None
+    if len(candidates) == 1 or not interactive:
+        return candidates[0]
+    print("\nДоступные книги для миграции:")
+    for idx, wb in enumerate(candidates, start=1):
+        print(f"  {idx}) {wb}")
+    raw = input("Выберите номер книги [1]: ").strip()
+    if not raw:
+        return candidates[0]
+    try:
+        selected = int(raw)
+    except Exception:
+        return candidates[0]
+    if 1 <= selected <= len(candidates):
+        return candidates[selected - 1]
+    return candidates[0]
+
+
+def _choose_mass_workbooks(candidates: List[str], interactive: bool) -> List[str]:
+    if not candidates:
+        return []
+    if not interactive:
+        return list(candidates)
+    print("\nДоступные книги для миграции:")
+    for idx, wb in enumerate(candidates, start=1):
+        print(f"  {idx}) {wb}")
+    raw = input("Введите номера книг через запятую или Enter для всех: ").strip()
+    if not raw:
+        return list(candidates)
+    selected: List[str] = []
+    for part in raw.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        try:
+            idx = int(token)
+        except Exception:
+            continue
+        if 1 <= idx <= len(candidates):
+            selected.append(candidates[idx - 1])
+    return selected or list(candidates)
+
+
+def _resolve_mode(mode: str, candidates: List[str], interactive: bool) -> str:
+    if mode in {"single", "mass"}:
+        return mode
+    if len(candidates) <= 1 or not interactive:
+        return "single"
+    print("\nНайдено несколько книг XLSM.")
+    print("  1) single - выбрать одну книгу")
+    print("  2) mass   - обработать несколько/все")
+    answer = input("Выберите режим [1]: ").strip().lower()
+    if answer in {"2", "mass", "m", "м"}:
+        return "mass"
+    return "single"
+
+
+def _infer_files_dir_for_workbook(
+    *,
+    workbook_path: str,
+    files_root: str,
+    files_map: Dict[str, str],
+    interactive: bool,
+    prompt_always: bool,
+) -> str:
+    workbook_abs = str(Path(workbook_path).resolve())
+    workbook_name = Path(workbook_abs).name
+    workbook_stem = Path(workbook_abs).stem
+    mapped_raw = files_map.get(workbook_abs) or files_map.get(workbook_name) or files_map.get(workbook_stem)
+
+    default_dir = str(Path(files_root).resolve())
+    if mapped_raw:
+        mapped_path = Path(str(mapped_raw).strip())
+        if not mapped_path.is_absolute():
+            mapped_path = (Path(SCRIPT_DIR) / mapped_path).resolve()
+        default_dir = str(mapped_path)
+    else:
+        root = Path(default_dir)
+        if root.exists() and root.is_dir():
+            for hint in _numeric_hints(workbook_name):
+                for folder_name in (
+                    hint,
+                    f"part{hint}",
+                    f"book{hint}",
+                    "one" if hint == "1" else "",
+                    "two" if hint == "2" else "",
+                    "three" if hint == "3" else "",
+                ):
+                    if not folder_name:
+                        continue
+                    candidate = root / folder_name
+                    if candidate.exists() and candidate.is_dir():
+                        default_dir = str(candidate.resolve())
+                        break
+
+    if interactive and (prompt_always or not mapped_raw):
+        chosen = _prompt_with_default(f"Files directory for {workbook_name}", default_dir, True)
+        return str(Path(chosen).expanduser().resolve())
+    return str(Path(default_dir).expanduser().resolve())
+
+
+def _resolve_workbook_specs(args: argparse.Namespace, interactive: bool, logger) -> Tuple[List[WorkbookRunSpec], str]:
+    explicit = parse_path_list(args.workbooks)
+    if not explicit and args.workbook:
+        explicit.append(args.workbook)
+    explicit_raw = ";".join(explicit)
+
+    candidates = discover_excel_files(SCRIPT_DIR, explicit_files=explicit_raw, pattern=EXCEL_INPUT_GLOB)
+    if not candidates:
+        candidates = discover_excel_files(SCRIPT_DIR, explicit_files="", pattern=EXCEL_INPUT_GLOB)
+    if not candidates:
+        raise FileNotFoundError("Книги XLSM не найдены")
+
+    resolved_mode = _resolve_mode(args.mode, candidates, interactive)
+    if resolved_mode == "single":
+        chosen = _choose_single_workbook(candidates, interactive)
+        selected = [chosen] if chosen else []
+    else:
+        selected = _choose_mass_workbooks(candidates, interactive)
+
+    if not selected:
+        raise RuntimeError("Не выбрано ни одной книги для миграции")
+
+    files_root = str(Path(args.files_dir).expanduser().resolve())
+    files_map = parse_key_value_mapping(args.files_map)
+    specs: List[WorkbookRunSpec] = []
+    for workbook_path in selected:
+        workbook_abs = str(Path(workbook_path).expanduser().resolve())
+        files_dir = _infer_files_dir_for_workbook(
+            workbook_path=workbook_abs,
+            files_root=files_root,
+            files_map=files_map,
+            interactive=interactive,
+            prompt_always=bool(args.ask_files_always),
+        )
+        specs.append(WorkbookRunSpec(workbook_path=workbook_abs, files_dir=files_dir))
+
+    logger.info("Выбрано книг: %s", len(specs))
+    for idx, spec in enumerate(specs, start=1):
+        logger.info("  %s) workbook=%s | files=%s", idx, spec.workbook_path, spec.files_dir)
+    return specs, resolved_mode
+
+
+def _resolve_runtime(args: argparse.Namespace) -> Tuple[str, str, str, str]:
+    if args.profile == "custom":
+        base_url = (args.base_url or BASE_URL).strip()
+        jwt_url = (args.jwt_url or JWT_URL or (base_url.rstrip("/") + "/jwt/")).strip()
+        ui_base_url = (args.ui_base_url or UI_BASE_URL or base_url).strip()
+    else:
+        profile = PROFILES[args.profile]
+        base_url = (args.base_url or profile.base_url).strip()
+        jwt_url = (args.jwt_url or profile.jwt_url).strip()
+        ui_base_url = (args.ui_base_url or profile.ui_base_url).strip()
+
+    if not base_url:
+        raise ValueError("base_url is empty")
+    if not jwt_url:
+        jwt_url = base_url.rstrip("/") + "/jwt/"
+    if not ui_base_url:
+        ui_base_url = base_url
+    return args.profile, base_url.rstrip("/"), jwt_url, ui_base_url.rstrip("/")
+
+
+def _choose_resume_strategy(*, state: ResumeState, logger, user_logger, interactive: bool) -> str:
+    if not state.enabled:
+        return "continue"
+    rows_count = state.rows_count()
+    if rows_count <= 0:
+        return "continue"
+
+    run_info = state.get_run_info()
+    status = str(run_info.get("status") or "").strip().lower()
+    incomplete_statuses = {"running", "stopped", "aborted", "interrupted", "failed", "error", ""}
+    if status not in incomplete_statuses:
+        return "continue"
+
+    last_checkpoint = run_info.get("lastCheckpoint") if isinstance(run_info.get("lastCheckpoint"), dict) else {}
+    lines = [
+        "Обнаружены незавершенные checkpoints предыдущего запуска.",
+        "",
+        f"Статус прошлого запуска : {status or 'неизвестно (старый формат state)'}",
+        f"Начало запуска          : {_format_iso_for_console(run_info.get('startedAt'))}",
+        f"Конец запуска           : {_format_iso_for_console(run_info.get('finishedAt'))}",
+        f"Профиль / стенд         : {run_info.get('profile') or '-'} / {run_info.get('baseUrl') or '-'}",
+        f"Строк в checkpoint      : {rows_count}",
+        f"Последняя позиция       : {last_checkpoint.get('job') or '-'} / row={last_checkpoint.get('row') or '-'}",
+        f"Последняя запись _id    : {last_checkpoint.get('_id') or '-'}",
+    ]
+    block = _console_block("RESUME: найдено незавершенное состояние", lines)
+    logger.warning("%s", block)
+    if user_logger:
+        user_logger.info(block)
+
+    if not interactive:
+        logger.info("Интерактив выключен, автоматически продолжаем по checkpoint.")
+        return "continue"
+
+    prompt = "\n[RESUME] Выберите: [P]продолжить / [C]сбросить / [Q]выйти: "
+    while True:
+        try:
+            raw = input(prompt)
+        except EOFError:
+            return "continue"
+        choice = norm_str(raw)
+        choice = choice.lower() if choice else ""
+        if choice in {"", "p", "продолжить", "continue", "resume"}:
+            return "continue"
+        if choice in {"c", "сбросить", "reset", "сброс", "start"}:
+            return "reset"
+        if choice in {"q", "quit", "выйти", "exit", "abort"}:
+            return "abort"
+
+
+def _log_user_run_header(
+    *,
+    user_logger,
+    profile: str,
+    base_url: str,
+    mode: str,
+    interactive: bool,
+    operator_mode: bool,
+    state_file_path: str,
+    success_log_path: str,
+    fail_log_path: str,
+) -> None:
+    if user_logger is None:
+        return
+    lines = [
+        "",
+        "#" * 92,
+        "===== СТАРТ МИГРАЦИИ ЯРМАРОК =====",
+        "-" * 92,
+        f"Профиль         : {profile}",
+        f"Стенд           : {base_url}",
+        f"Режим           : {mode}",
+        f"Интерактивный   : {'да' if interactive else 'нет'}",
+        f"Operator mode   : {'включен' if operator_mode else 'выключен'}",
+        f"checkpoints     : {state_file_path}",
+        f"Лог успехов     : {success_log_path or '-'}",
+        f"Лог ошибок      : {fail_log_path or '-'}",
+        "#" * 92,
+    ]
+    user_logger.info("\n".join(lines))
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Миграция данных реестров ярмарок")
+    parser.add_argument("--profile", choices=["custom", "dev", "psi", "prod"], default="dev")
+    parser.add_argument("--base-url", default="")
+    parser.add_argument("--jwt-url", default="")
+    parser.add_argument("--ui-base-url", default="")
+
+    parser.add_argument("--mode", choices=["auto", "single", "mass"], default="auto")
+    parser.add_argument(
+        "--workbook",
+        default=str(Path(SCRIPT_DIR) / EXCEL_FILE_NAME),
+        help="Путь к книге Excel (совместимость)",
+    )
+    parser.add_argument("--workbooks", default="", help="Явный список книг (разделитель ';' или новая строка)")
+    parser.add_argument("--files-dir", default=FILES_DIR, help="Папка с файлами для загрузки")
+    parser.add_argument("--files-map", default="", help="Связка книга->папка файлов: 'book1.xlsm=dir1;book2.xlsm=dir2'")
+    parser.add_argument("--ask-files-always", action="store_true", help="Всегда спрашивать папку файлов для каждой книги")
+
+    parser.add_argument("--sheet", choices=["all", "fair", "mesto", "permits"], default="all", help="Какие листы запускать")
+    parser.add_argument("--limit", type=int, default=0, help="Ограничение по числу строк на лист")
+    parser.add_argument("--auth-only", action="store_true", help="Проверить авторизацию и завершить работу")
+    parser.add_argument("--skip-auth", action="store_true", help="Пропустить авторизацию. Допустимо только с --dry-run")
+    parser.add_argument("--dry-run", action="store_true", help="Только собрать payload без записи в API")
+    parser.add_argument("--no-auth", action="store_true", help=argparse.SUPPRESS)
+
+    parser.add_argument("--operator-mode", action="store_true", help="На ошибке строки: retry/skip/abort")
+    parser.add_argument("--no-prompt", action="store_true", help="Не запрашивать input, использовать значения из файлов")
+    parser.add_argument("--no-interactive", action="store_true", help="Отключить интерактивный режим")
+
+    parser.add_argument("--state-file", default=str(STATE_FILE), help="Путь к checkpoints JSON")
+    parser.add_argument("--reset-state", action="store_true", help="Очистить checkpoints перед запуском")
+    parser.add_argument("--resume", dest="resume", action="store_true", default=RESUME_BY_DEFAULT, help="Продолжать с checkpoints")
+    parser.add_argument("--no-resume", dest="resume", action="store_false", help="Игнорировать checkpoints")
+    return parser.parse_args()
 
 
 def process_sheet_data(
@@ -1344,6 +1723,9 @@ def process_sheet_data(
     resume_enabled,
     limit,
     stats,
+    dry_run,
+    operator_mode,
+    interactive,
 ):
     collection_map = {
         SHEET_FAIR: FAIR_COLLECTION,
@@ -1354,7 +1736,7 @@ def process_sheet_data(
     if not collection:
         logger.error(f"Unknown sheet: {list_name}")
         stats["failedRows"] += 1
-        return
+        return False
 
     rows_total = len(excel)
     for row_num, row in enumerate(excel.to_dict("records"), start=1):
@@ -1370,126 +1752,178 @@ def process_sheet_data(
                 continue
 
         stats["processedRows"] += 1
-        logger.info(f"{list_name}: РѕР±СЂР°Р±РѕС‚РєР° СЃС‚СЂРѕРєРё {row_num}/{rows_total}")
+        logger.info("%s: обработка строки %s/%s", list_name, row_num, rows_total)
+        while True:
+            try:
+                if list_name == SHEET_FAIR:
+                    rec_data = process_fair_sheet(row, logger, session=session if not (TEST or dry_run) else None)
+                elif list_name == SHEET_MESTO:
+                    rec_data = process_mesto_sheet(row, logger, session=session if not (TEST or dry_run) else None)
+                else:
+                    rec_data = process_permits_sheet(row, logger)
 
-        try:
-            if list_name == SHEET_FAIR:
-                rec_data = process_fair_sheet(row, logger, session=session if not TEST else None)
-            elif list_name == SHEET_MESTO:
-                rec_data = process_mesto_sheet(row, logger, session=session if not TEST else None)
-            else:
-                rec_data = process_permits_sheet(row, logger)
-
-            if TEST:
-                logger.info(f"TEST MODE {list_name}: {json.dumps(rec_data, ensure_ascii=False)}")
-                if list_name == SHEET_MESTO:
-                    markets = rec_data.get("marketInfo") or []
-                    if not markets:
-                        logger.info(f"TEST MODE NSI {list_name}: {json.dumps(build_nsi_local_object_fair_from_payload(rec_data, None), ensure_ascii=False)}")
-                    else:
-                        for market in markets:
-                            logger.info(f"TEST MODE NSI {list_name}: {json.dumps(build_nsi_local_object_fair_from_payload(rec_data, market), ensure_ascii=False)}")
-                continue
-
-            record_json, response = create_record(session, logger, collection, rec_data)
-            if not record_json:
-                status_code = getattr(response, "status_code", "n/a")
-                logger.error(f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё Р·Р°РїРёСЃРё РІ {collection}: HTTP {status_code}")
-                fail_logger.info(f"{list_name}:{row_num}")
-                stats["failedRows"] += 1
-                continue
-
-            log_success(success_logger, {"_id": record_json["_id"], "guid": record_json["guid"], "parentEntries": collection})
-            logger.info(f"РЎРѕР·РґР°РЅР° Р·Р°РїРёСЃСЊ РІ {collection}: {record_json['_id']}")
-
-            if list_name == SHEET_PERMITS:
-                permit_ok = handle_permit_file_upload(
-                    row,
-                    rec_data,
-                    collection,
-                    record_json,
-                    session,
-                    logger,
-                    fail_logger,
-                    row_num,
-                    files_dir,
-                )
-                if not permit_ok:
-                    stats["failedRows"] += 1
-                    continue
-                update_fair_dates_from_permit(row, session, logger, success_logger, fail_logger, row_num)
-                state.mark_success(
-                    workbook_path=str(workbook_path),
-                    job_name=list_name,
-                    row_idx=row_num,
-                    collection=str(collection),
-                    main_id=str(record_json.get("_id")),
-                    guid=str(record_json.get("guid")),
-                    had_errors=False,
-                    error_count=0,
-                )
-                stats["createdRows"] += 1
-                continue
-
-            if list_name != SHEET_MESTO:
-                state.mark_success(
-                    workbook_path=str(workbook_path),
-                    job_name=list_name,
-                    row_idx=row_num,
-                    collection=str(collection),
-                    main_id=str(record_json.get("_id")),
-                    guid=str(record_json.get("guid")),
-                    had_errors=False,
-                    error_count=0,
-                )
-                stats["createdRows"] += 1
-                continue
-
-            markets = rec_data.get("marketInfo") or []
-            nsi_payloads = [build_nsi_local_object_fair_from_payload(rec_data, market) for market in markets] or [
-                build_nsi_local_object_fair_from_payload(rec_data, None)
-            ]
-
-            nsi_failed = False
-            for nsi_payload in nsi_payloads:
-                nsi_json, nsi_response = create_record(session, logger, NSI_LOCAL_OBJECT_FAIR_COLLECTION, nsi_payload)
-                if not nsi_json:
-                    status_code = getattr(nsi_response, "status_code", "n/a")
-                    logger.error(
-                        f"РћС€РёР±РєР° РїСЂРё СЃРѕР·РґР°РЅРёРё Р·Р°РїРёСЃРё РІ {NSI_LOCAL_OBJECT_FAIR_COLLECTION}: HTTP {status_code}"
-                    )
-                    fail_logger.info(f"{list_name}:{row_num}:nsi")
-                    stats["failedRows"] += 1
-                    nsi_failed = True
+                if TEST or dry_run:
+                    logger.info("[DRY] %s", json.dumps(rec_data, ensure_ascii=False))
+                    if list_name == SHEET_MESTO:
+                        markets = rec_data.get("marketInfo") or []
+                        if not markets:
+                            logger.info(
+                                "[DRY][NSI] %s",
+                                json.dumps(build_nsi_local_object_fair_from_payload(rec_data, None), ensure_ascii=False),
+                            )
+                        else:
+                            for market in markets:
+                                logger.info(
+                                    "[DRY][NSI] %s",
+                                    json.dumps(build_nsi_local_object_fair_from_payload(rec_data, market), ensure_ascii=False),
+                                )
                     break
-                log_success(
-                    success_logger,
-                    {
-                        "_id": nsi_json["_id"],
-                        "guid": nsi_json["guid"],
-                        "parentEntries": NSI_LOCAL_OBJECT_FAIR_COLLECTION,
-                    },
-                )
-                logger.info(f"РЎРѕР·РґР°РЅР° Р·Р°РїРёСЃСЊ РІ {NSI_LOCAL_OBJECT_FAIR_COLLECTION}: {nsi_json['_id']}")
-            if nsi_failed:
-                continue
-            state.mark_success(
-                workbook_path=str(workbook_path),
-                job_name=list_name,
-                row_idx=row_num,
-                collection=str(collection),
-                main_id=str(record_json.get("_id")),
-                guid=str(record_json.get("guid")),
-                had_errors=False,
-                error_count=0,
-            )
-            stats["createdRows"] += 1
 
-        except Exception as exc:
-            logger.error(f"РћС€РёР±РєР° РїСЂРё РѕР±СЂР°Р±РѕС‚РєРµ СЃС‚СЂРѕРєРё {row_num}: {exc}")
-            fail_logger.info(f"{list_name}:{row_num}")
-            logger.debug(traceback.format_exc())
-            stats["failedRows"] += 1
+                record_json, response = create_record(session, logger, collection, rec_data)
+                if not record_json:
+                    status_code = getattr(response, "status_code", "n/a")
+                    logger.error("Ошибка при создании записи в %s: HTTP %s", collection, status_code)
+                    fail_logger.info(f"{list_name}:{row_num}")
+                    stats["failedRows"] += 1
+                    action = _operator_action_on_row_error(
+                        operator_mode=operator_mode,
+                        interactive=interactive,
+                        logger=logger,
+                        context=f"{list_name}:{row_num}:create_http_{status_code}",
+                    )
+                    if action == "retry":
+                        continue
+                    if action == "abort":
+                        return True
+                    break
+
+                log_success(success_logger, {"_id": record_json["_id"], "guid": record_json["guid"], "parentEntries": collection})
+                logger.info("Создана запись в %s: %s", collection, record_json["_id"])
+
+                if list_name == SHEET_PERMITS:
+                    permit_ok = handle_permit_file_upload(
+                        row,
+                        rec_data,
+                        collection,
+                        record_json,
+                        session,
+                        logger,
+                        fail_logger,
+                        row_num,
+                        files_dir,
+                    )
+                    if not permit_ok:
+                        stats["failedRows"] += 1
+                        action = _operator_action_on_row_error(
+                            operator_mode=operator_mode,
+                            interactive=interactive,
+                            logger=logger,
+                            context=f"{list_name}:{row_num}:permit_upload",
+                        )
+                        if action == "retry":
+                            continue
+                        if action == "abort":
+                            return True
+                        break
+
+                    update_fair_dates_from_permit(row, session, logger, success_logger, fail_logger, row_num)
+                    state.mark_success(
+                        workbook_path=str(workbook_path),
+                        job_name=list_name,
+                        row_idx=row_num,
+                        collection=str(collection),
+                        main_id=str(record_json.get("_id")),
+                        guid=str(record_json.get("guid")),
+                        had_errors=False,
+                        error_count=0,
+                    )
+                    stats["createdRows"] += 1
+                    break
+
+                if list_name != SHEET_MESTO:
+                    state.mark_success(
+                        workbook_path=str(workbook_path),
+                        job_name=list_name,
+                        row_idx=row_num,
+                        collection=str(collection),
+                        main_id=str(record_json.get("_id")),
+                        guid=str(record_json.get("guid")),
+                        had_errors=False,
+                        error_count=0,
+                    )
+                    stats["createdRows"] += 1
+                    break
+
+                markets = rec_data.get("marketInfo") or []
+                nsi_payloads = [build_nsi_local_object_fair_from_payload(rec_data, market) for market in markets] or [
+                    build_nsi_local_object_fair_from_payload(rec_data, None)
+                ]
+                nsi_failed = False
+                for nsi_payload in nsi_payloads:
+                    nsi_json, nsi_response = create_record(session, logger, NSI_LOCAL_OBJECT_FAIR_COLLECTION, nsi_payload)
+                    if not nsi_json:
+                        status_code = getattr(nsi_response, "status_code", "n/a")
+                        logger.error(
+                            "Ошибка при создании записи в %s: HTTP %s",
+                            NSI_LOCAL_OBJECT_FAIR_COLLECTION,
+                            status_code,
+                        )
+                        fail_logger.info(f"{list_name}:{row_num}:nsi")
+                        stats["failedRows"] += 1
+                        nsi_failed = True
+                        break
+                    log_success(
+                        success_logger,
+                        {
+                            "_id": nsi_json["_id"],
+                            "guid": nsi_json["guid"],
+                            "parentEntries": NSI_LOCAL_OBJECT_FAIR_COLLECTION,
+                        },
+                    )
+                    logger.info("Создана запись в %s: %s", NSI_LOCAL_OBJECT_FAIR_COLLECTION, nsi_json["_id"])
+
+                if nsi_failed:
+                    action = _operator_action_on_row_error(
+                        operator_mode=operator_mode,
+                        interactive=interactive,
+                        logger=logger,
+                        context=f"{list_name}:{row_num}:nsi_create",
+                    )
+                    if action == "retry":
+                        continue
+                    if action == "abort":
+                        return True
+                    break
+
+                state.mark_success(
+                    workbook_path=str(workbook_path),
+                    job_name=list_name,
+                    row_idx=row_num,
+                    collection=str(collection),
+                    main_id=str(record_json.get("_id")),
+                    guid=str(record_json.get("guid")),
+                    had_errors=False,
+                    error_count=0,
+                )
+                stats["createdRows"] += 1
+                break
+            except Exception as exc:
+                logger.error("Ошибка при обработке строки %s: %s", row_num, exc)
+                fail_logger.info(f"{list_name}:{row_num}")
+                logger.debug(traceback.format_exc())
+                stats["failedRows"] += 1
+                action = _operator_action_on_row_error(
+                    operator_mode=operator_mode,
+                    interactive=interactive,
+                    logger=logger,
+                    context=f"{list_name}:{row_num}:exception",
+                )
+                if action == "retry":
+                    continue
+                if action == "abort":
+                    return True
+                break
+    return False
 
 
 def main():
@@ -1502,39 +1936,88 @@ def main():
     user_logger = setup_user_logger()
 
     interactive = not args.no_interactive and not args.no_prompt
-    workbook_default = str(Path(args.workbook).expanduser().resolve())
-    files_default = str(Path(args.files_dir).expanduser().resolve())
-    workbook_path = Path(_prompt_with_default("Excel workbook", workbook_default, interactive)).expanduser().resolve()
-    files_dir = str(Path(_prompt_with_default("Files directory", files_default, interactive)).expanduser().resolve())
+    try:
+        profile_name, runtime_base_url, runtime_jwt_url, runtime_ui_url = _resolve_runtime(args)
+    except Exception as exc:
+        logger.error("Runtime config error: %s", exc)
+        return 1
+    set_runtime_urls(base_url=runtime_base_url, jwt_url=runtime_jwt_url, ui_base_url=runtime_ui_url)
 
-    if not workbook_path.exists():
-        logger.error("Workbook not found: %s", workbook_path)
+    skip_auth = bool(args.skip_auth or args.no_auth)
+    if skip_auth and not args.dry_run:
+        logger.error("--skip-auth can be used only with --dry-run")
+        return 1
+    if args.auth_only and skip_auth:
+        logger.error("--auth-only cannot be used together with --skip-auth")
+        return 1
+
+    try:
+        workbook_specs, resolved_mode = _resolve_workbook_specs(args, interactive, logger)
+    except Exception as exc:
+        logger.error("Workbook selection error: %s", exc)
         return 1
 
     state_path = Path(args.state_file).expanduser().resolve()
-    state = ResumeState(path=state_path, namespace="fairs_migration", enabled=True)
+    state_namespace = f"fairs_migration:{profile_name}"
+    state = ResumeState(path=state_path, namespace=state_namespace, enabled=True)
     if args.reset_state:
         state.reset_namespace()
         logger.info("State reset: %s", state_path)
 
     resume_enabled = bool(args.resume)
-    if resume_enabled and state.rows_count() > 0 and interactive:
-        run_info = state.get_run_info()
-        logger.info(
-            "Найдены checkpoints: rows=%s status=%s startedAt=%s",
-            state.rows_count(),
-            run_info.get("status"),
-            run_info.get("startedAt"),
-        )
-        if not _ask_yes_no("Продолжить с предыдущего checkpoints?", default_yes=True):
+    if resume_enabled:
+        strategy = _choose_resume_strategy(state=state, logger=logger, user_logger=user_logger, interactive=interactive)
+        if strategy == "abort":
+            logger.warning("Stopped by operator before start")
+            return 1
+        if strategy == "reset":
             state.clear_rows()
             resume_enabled = False
+            logger.info("Checkpoints cleared before start")
+
+    logger.info(
+        "%s",
+        _console_block(
+            "Fairs migration start",
+            [
+                f"Profile      : {profile_name}",
+                f"Base URL     : {get_runtime_base_url()}",
+                f"UI URL       : {get_runtime_ui_base_url()}",
+                f"Mode         : {resolved_mode}",
+                f"Sheet mode   : {args.sheet}",
+                f"Dry run      : {args.dry_run}",
+                f"Skip auth    : {skip_auth}",
+                f"Resume       : {resume_enabled}",
+                f"State file   : {state_path}",
+                f"Interactive  : {interactive}",
+                f"Operator mode: {args.operator_mode}",
+                f"Workbook(s)  : {len(workbook_specs)}",
+            ],
+        ),
+    )
+    _log_user_run_header(
+        user_logger=user_logger,
+        profile=profile_name,
+        base_url=get_runtime_base_url(),
+        mode=resolved_mode,
+        interactive=interactive,
+        operator_mode=bool(args.operator_mode),
+        state_file_path=str(state_path),
+        success_log_path=getattr(success_logger, "log_path", ""),
+        fail_log_path=getattr(fail_logger, "log_path", ""),
+    )
 
     state.begin_run(
-        workbook=str(workbook_path),
-        filesDir=files_dir,
+        profile=profile_name,
+        baseUrl=get_runtime_base_url(),
+        uiBaseUrl=get_runtime_ui_base_url(),
+        mode=resolved_mode,
         sheet=args.sheet,
+        dryRun=bool(args.dry_run),
         resume=resume_enabled,
+        operatorMode=bool(args.operator_mode),
+        workbooks=[spec.workbook_path for spec in workbook_specs],
+        filesMap={spec.workbook_path: spec.files_dir for spec in workbook_specs},
     )
 
     stopped = False
@@ -1548,58 +2031,90 @@ def main():
 
     try:
         session = None
-        if not TEST and not args.no_auth:
+        if not skip_auth:
             session = setup_session(logger, no_prompt=(args.no_prompt or args.no_interactive))
             if session is None:
-                fatal_error = True
-                stats["failedRows"] += 1
-                return 1
+                raise RuntimeError("Auth failed")
+            logger.info("Auth succeeded")
 
-        excel_path = str(workbook_path)
-        logger.info(f"Р§С‚РµРЅРёРµ С„Р°Р№Р»Р°: {excel_path}")
-        user_logger.info(
-            "START | workbook=%s | files=%s | sheet=%s | resume=%s",
-            excel_path,
-            files_dir,
-            args.sheet,
-            resume_enabled,
-        )
+        if args.auth_only:
+            logger.info("--auth-only: auth checked, migration skipped")
+            state.finish_run(
+                status="completed",
+                summary={
+                    "authOnly": True,
+                    "workbooks": len(workbook_specs),
+                    "createdRows": 0,
+                    "processedRows": 0,
+                    "resumeSkips": 0,
+                    "failedRows": 0,
+                },
+                clear_rows=True,
+            )
+            return 0
 
-        for list_name in _selected_lists(args.sheet):
-            logger.info(f"РћР±СЂР°Р±РѕС‚РєР° Р»РёСЃС‚Р°: {list_name}")
-            excel = read_excel(excel_path, skiprows=3, sheet_name=list_name)
-            if excel is None:
-                logger.error(f"Р›РёСЃС‚ {list_name} РЅРµ РЅР°Р№РґРµРЅ РІ С„Р°Р№Р»Рµ {excel_path}")
-                stats["failedRows"] += 1
-                continue
+        for spec in workbook_specs:
+            workbook_path = Path(spec.workbook_path).expanduser().resolve()
+            files_dir_active = str(Path(spec.files_dir).expanduser().resolve())
+            if not workbook_path.exists():
+                raise FileNotFoundError(f"Workbook not found: {workbook_path}")
 
-            excel = excel.iloc[1:].reset_index(drop=True)
-            excel.columns = [str(column).strip() for column in excel.columns]
-            logger.info(f"Р—Р°РіСЂСѓР¶РµРЅРѕ СЃС‚СЂРѕРє: {len(excel)}")
-
-            process_sheet_data(
-                list_name,
-                excel,
-                session,
-                logger,
-                success_logger,
-                fail_logger,
-                workbook_path=str(workbook_path),
-                files_dir=files_dir,
-                state=state,
-                resume_enabled=resume_enabled,
-                limit=args.limit,
-                stats=stats,
+            logger.info("%s", _console_block("Workbook", [f"Path: {workbook_path}", f"Files: {files_dir_active}"]))
+            user_logger.info(
+                "WORKBOOK_START | workbook=%s | files=%s | sheet=%s | resume=%s",
+                str(workbook_path),
+                files_dir_active,
+                args.sheet,
+                resume_enabled,
             )
 
-        logger.info("РњРёРіСЂР°С†РёСЏ Р·Р°РІРµСЂС€РµРЅР°")
+            for list_name in _selected_lists(args.sheet):
+                logger.info("Process sheet: %s | workbook: %s", list_name, workbook_path.name)
+                excel = read_excel(str(workbook_path), skiprows=3, sheet_name=list_name)
+                if excel is None:
+                    raise RuntimeError(f"Cannot read sheet '{list_name}' from workbook {workbook_path}")
+                excel = excel.iloc[1:].reset_index(drop=True)
+                excel.columns = [str(column).strip() for column in excel.columns]
+                logger.info("Rows loaded: %s", len(excel))
+
+                stopped_here = process_sheet_data(
+                    list_name,
+                    excel,
+                    session,
+                    logger,
+                    success_logger,
+                    fail_logger,
+                    workbook_path=str(workbook_path),
+                    files_dir=files_dir_active,
+                    state=state,
+                    resume_enabled=resume_enabled,
+                    limit=args.limit,
+                    stats=stats,
+                    dry_run=bool(args.dry_run),
+                    operator_mode=bool(args.operator_mode),
+                    interactive=interactive,
+                )
+                if stopped_here:
+                    stopped = True
+                    logger.warning("Stopped by operator on %s/%s", workbook_path.name, list_name)
+                    break
+
+            user_logger.info(
+                "WORKBOOK_FINISH | workbook=%s | created=%s | failed=%s | resume_skips=%s",
+                str(workbook_path),
+                stats["createdRows"],
+                stats["failedRows"],
+                stats["resumeSkips"],
+            )
+            if stopped:
+                break
 
     except KeyboardInterrupt:
         stopped = True
-        logger.warning("Остановка по Ctrl+C")
+        logger.warning("Interrupted by Ctrl+C")
     except Exception as exc:
         fatal_error = True
-        logger.error(f"РљСЂРёС‚РёС‡РµСЃРєР°СЏ РѕС€РёР±РєР°: {exc}")
+        logger.error("Critical error: %s", exc)
         logger.debug(traceback.format_exc())
     finally:
         if stopped:
@@ -1614,13 +2129,12 @@ def main():
 
         user_logger.info("FINISH | status=%s | summary=%s", status, json.dumps(stats, ensure_ascii=False))
         logger.info(
-            "Итог: status=%s created=%s failed=%s resumed_skips=%s",
+            "Finish: status=%s created=%s failed=%s resumed_skips=%s",
             status,
             stats["createdRows"],
             stats["failedRows"],
             stats["resumeSkips"],
         )
-
     return 0 if not stopped and not fatal_error and stats["failedRows"] == 0 else 1
 
 

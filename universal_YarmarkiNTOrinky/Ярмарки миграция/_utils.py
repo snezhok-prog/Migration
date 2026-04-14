@@ -3,6 +3,8 @@ import re
 import base64
 import json
 import uuid
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 
 import pandas as pd
@@ -236,3 +238,72 @@ def find_document_group_by_mnemonic(document_groups, target_mnemonic="request"):
             if branch_item.get("mnemonic") == target_mnemonic:
                 return branch_item
     return None
+
+
+def parse_key_value_mapping(raw: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    text = str(raw or "").strip()
+    if not text:
+        return out
+    for part in re.split(r"[;\n]+", text):
+        piece = part.strip()
+        if not piece or "=" not in piece:
+            continue
+        key, value = piece.split("=", 1)
+        k = key.strip()
+        v = value.strip()
+        if k:
+            out[k] = v
+    return out
+
+
+def parse_path_list(raw: str) -> List[str]:
+    out: List[str] = []
+    text = str(raw or "").strip()
+    if not text:
+        return out
+    for part in re.split(r"[;\n]+", text):
+        token = part.strip().strip('"').strip("'").strip()
+        if token:
+            out.append(token)
+    return out
+
+
+def resolve_local_file_path(filename: str, files_dir: Path, base_dir: Path) -> Optional[str]:
+    candidate = str(filename or "").strip()
+    if not candidate:
+        return None
+
+    if os.path.isabs(candidate) and os.path.isfile(candidate):
+        return os.path.abspath(candidate)
+
+    p1 = (files_dir / candidate).resolve()
+    if p1.exists() and p1.is_file():
+        return str(p1)
+
+    p2 = (base_dir / candidate).resolve()
+    if p2.exists() and p2.is_file():
+        return str(p2)
+
+    base_name = os.path.basename(candidate).lower()
+    if files_dir.exists():
+        for root, _, files in os.walk(str(files_dir)):
+            for fn in files:
+                if fn.lower() == base_name:
+                    return str((Path(root) / fn).resolve())
+    return None
+
+
+def read_text_if_exists(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8", errors="ignore").replace("\ufeff", "").strip()
+
+
+def write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def dump_json(path: Path, data: Any) -> None:
+    write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
