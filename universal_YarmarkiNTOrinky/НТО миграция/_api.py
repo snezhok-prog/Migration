@@ -382,6 +382,16 @@ def search_org_by_ogrn(session: Optional[requests.Session], logger, ogrn: Any) -
         return None
     payload = _safe_json(resp)
     content = payload.get("content") if isinstance(payload, dict) else []
-    if isinstance(content, list) and len(content) == 1:
-        return content[0]
+    if isinstance(content, list):
+        if len(content) == 1:
+            return content[0]
+        if len(content) > 1:
+            first = content[0] if isinstance(content[0], dict) else None
+            logger.warning(
+                "[ORG SEARCH] multiple matches for ogrn=%s (count=%s), using first id=%s",
+                val,
+                len(content),
+                (first or {}).get("_id"),
+            )
+            return first
     return None

@@ -36,6 +36,10 @@ NTO_MESTO_COLLECTION = "NTOmesto"
 NTO_NSI_COLLECTION = "nsiLocalObjectNTO"
 TORGI_COLLECTION = "reestrbiddingReestr"
 
+# If True, migration will NOT fallback to DEFAULT_ORG when org/unit not found.
+# Instead row processing will fail with explicit error.
+DISABLE_DEFAULT_ORG_FALLBACK = False
+
 DEFAULT_ORG = {
     "id": "5982897d-bf70-4e95-8030-a54cafae4b30",
     "_id": "6650527c3000227496944b6b",

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from _api import search_org_by_ogrn
-from _config import DEFAULT_ORG
+from _config import DEFAULT_ORG, DISABLE_DEFAULT_ORG_FALLBACK
 from _nto_mappings import (
     MAP_BIDDING_FORM,
     MAP_BIDDING_STATUS,
@@ -708,10 +708,48 @@ def build_org_info_fallback(src: Any) -> Dict[str, Any]:
     return org
 
 
+def _org_identity_hint(src: Any) -> str:
+    ogrn = norm_str(get_any(src, ["ОГРН организации", "ogrn_upolnomochennogo_organa", "orgn", "ogrn"], None))
+    inn = norm_str(get_any(src, ["ИНН", "inn_upolnomochennogo_organa", "inn"], None))
+    name = norm_str(get_any(src, ["Наименование организации", "organization"], None))
+    parts = []
+    if ogrn:
+        parts.append(f"ОГРН={ogrn}")
+    if inn:
+        parts.append(f"ИНН={inn}")
+    if name:
+        parts.append(f"Наименование='{name}'")
+    return ", ".join(parts) if parts else "без идентификаторов"
+
+
 def build_org_info(src: Any, session, logger) -> Dict[str, Any]:
     ogrn = norm_str(get_any(src, ["ОГРН организации", "ogrn_upolnomochennogo_organa", "orgn", "ogrn"], None))
     org = search_org_by_ogrn(session, logger, ogrn) if session else None
-    return org if org else build_org_info_fallback(src)
+    if org:
+        return org
+    if DISABLE_DEFAULT_ORG_FALLBACK:
+        raise ValueError(
+            "Организация не найдена в organizations и fallback на DEFAULT_ORG отключен "
+            f"(DISABLE_DEFAULT_ORG_FALLBACK=True, { _org_identity_hint(src) })"
+        )
+    return build_org_info_fallback(src)
+
+
+def _unit_from_org(org: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(org, dict):
+        return None
+    org_id = org.get("_id") or org.get("id")
+    org_name = norm_str(org.get("name"))
+    org_short_name = norm_str(org.get("shortName")) or org_name
+    if not org_id and not org_name:
+        return None
+    return {
+        "id": org_id,
+        "_id": org_id,
+        "guid": generate_guid(),
+        "name": org_name or None,
+        "shortName": org_short_name or org_name or None,
+    }
 
 
 def map_nnto_type(value: Any) -> Optional[Dict[str, Any]]:
@@ -1124,6 +1162,20 @@ def transform_row_to_registry(src: Any, session, logger) -> Tuple[Dict[str, Any]
 
     unit = build_unit_info(src) or build_unit_info(block) or build_unit_info(info_common)
     org = build_org_info(info_common, session, logger)
+    org_unit = _unit_from_org(org)
+    if unit:
+        unit_id = unit.get("_id") or unit.get("id")
+        if not unit_id and org_unit and org_unit.get("id"):
+            unit["id"] = org_unit.get("id")
+            unit["_id"] = org_unit.get("id")
+        if (not norm_str(unit.get("name"))) and org_unit and org_unit.get("name"):
+            unit["name"] = org_unit.get("name")
+            unit["shortName"] = org_unit.get("shortName") or org_unit.get("name")
+        elif (not norm_str(unit.get("shortName"))) and norm_str(unit.get("name")):
+            unit["shortName"] = unit.get("name")
+    elif org_unit:
+        # Prefer organization-as-unit over DEFAULT_ORG when organization lookup succeeded.
+        unit = org_unit
 
     general_information = {
         "Subject": norm_str(info_common.get("subekt_rf")) or None,
@@ -1312,13 +1364,24 @@ def transform_row_to_registry(src: Any, session, logger) -> Tuple[Dict[str, Any]
             }
         )
 
+    if unit:
+        unit_payload = {
+            "id": unit.get("_id") or unit.get("id"),
+            "name": unit.get("name"),
+            "shortName": unit.get("shortName") or unit.get("name"),
+        }
+    elif DISABLE_DEFAULT_ORG_FALLBACK:
+        raise ValueError("Не заполнено структурное подразделение (unit), fallback на DEFAULT_ORG отключен")
+    else:
+        unit_payload = {
+            "id": DEFAULT_ORG["_id"],
+            "name": DEFAULT_ORG["name"],
+            "shortName": DEFAULT_ORG["shortName"],
+        }
+
     payload = {
         "guid": generate_guid(),
-        "unit": {
-            "id": (unit.get("_id") or unit.get("id")) if unit else DEFAULT_ORG["_id"],
-            "name": unit.get("name") if unit else DEFAULT_ORG["name"],
-            "shortName": (unit.get("shortName") or unit.get("name")) if unit else DEFAULT_ORG["shortName"],
-        },
+        "unit": unit_payload,
         "parentEntries": "NTOmesto",
         "generalInformation": general_information,
         "ntoInformation": nto_information,
@@ -1493,11 +1556,24 @@ def _make_search_org_result(src: Any, session, logger) -> Optional[Dict[str, Any
 def _resolve_bidding_unit(src: Any, session, logger) -> Dict[str, Any]:
     org = _make_search_org_result(src, session, logger)
     if org:
+        org_id = org.get("_id") or org.get("id")
+        org_name = org.get("name")
+        org_short_name = org.get("shortName") or org_name
+        if DISABLE_DEFAULT_ORG_FALLBACK and (not org_id or not org_name):
+            raise ValueError(
+                "Найдена организация, но в ней отсутствуют обязательные поля для unit "
+                f"(id/name), { _org_identity_hint(src) }"
+            )
         return {
-            "id": org.get("_id") or org.get("id") or DEFAULT_ORG["_id"],
-            "name": org.get("name") or DEFAULT_ORG["name"],
-            "shortName": org.get("shortName") or org.get("name") or DEFAULT_ORG["shortName"],
+            "id": org_id or DEFAULT_ORG["_id"],
+            "name": org_name or DEFAULT_ORG["name"],
+            "shortName": org_short_name or DEFAULT_ORG["shortName"],
         }
+    if DISABLE_DEFAULT_ORG_FALLBACK:
+        raise ValueError(
+            "Организация для торгов не найдена и fallback на DEFAULT_ORG отключен "
+            f"(DISABLE_DEFAULT_ORG_FALLBACK=True, { _org_identity_hint(src) })"
+        )
     return {"id": DEFAULT_ORG["_id"], "name": DEFAULT_ORG["name"], "shortName": DEFAULT_ORG["shortName"]}
 
 
